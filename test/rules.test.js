@@ -234,6 +234,30 @@ t('AI plan always ends with exactly one discard and keeps hands legal', () => {
   assert.strictEqual(new Set(usedIds).size, usedIds.length, 'no card used twice');
 });
 
+t('AI holds cards that fit table melds instead of discarding them', () => {
+  const run = R.validateMeld([c(5, '♥'), c(6, '♥'), c(7, '♥')]);
+  const set = R.validateMeld([c(11, '♠'), c(11, '♥'), c(11, '♦')]);
+  // 8♥ attaches to the run, J♣ completes the set; 9♦/2♣ are junk
+  const hand = [c(8, '♥'), c(11, '♣'), c(9, '♦'), c(2, '♣')];
+  const first = AI.chooseDiscard(hand, [run, set]);
+  assert(first.rank === 9 || first.rank === 2, `discarded ${R.cardLabel(first)}`);
+  // without the table in view, the J♣ (highest penalty, "useless") would
+  // have gone first — exactly the mistake the table awareness prevents
+  const blind = AI.chooseDiscard(hand, []);
+  assert.strictEqual(blind.rank, 11);
+});
+
+t('AI keeps pairs and run neighbours over lone cards', () => {
+  const hand = [c(7, '♠'), c(7, '♥'), c(4, '♦'), c(5, '♦'), c(12, '♣')];
+  const pick = AI.chooseDiscard(hand, []);
+  assert.strictEqual(pick.rank, 12, `discarded ${R.cardLabel(pick)}`);
+});
+
+t('AI never discards a joker while it has any other card', () => {
+  const hand = [joker(), c(2, '♦')];
+  assert.strictEqual(AI.chooseDiscard(hand, []).rank, 2);
+});
+
 t('AI takes the discard only when it is usable', () => {
   const player = {
     opened: true,

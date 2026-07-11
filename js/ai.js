@@ -160,20 +160,32 @@
         if ((card.rank === 1 && o.rank === 13) || (card.rank === 13 && o.rank === 1)) u += 2;
       }
     }
+    // a joker in hand turns any partial combination into a real meld
+    if (u > 0 && hand.some((o) => o !== card && o.joker)) u += 1;
     return u;
   }
 
-  function chooseDiscard(hand) {
+  /* Pick the least valuable discard, table-aware:
+   * - never let go of a joker while there is any other choice
+   * - hold cards that attach to melds on the table (we can dump them the
+   *   moment we're opened — and discarding them gifts the opponent a
+   *   free pickup)
+   * - hold cards that pair up or sit near a run in hand
+   * - among equally useless cards, shed the highest penalty points */
+  function chooseDiscard(hand, tableMelds) {
+    tableMelds = tableMelds || [];
     let pick = hand[0];
     let pickScore = Infinity;
     for (const c of hand) {
-      const score = usefulness(c, hand) * 100 - R.handPenalty(c);
+      if (c.joker) continue;
+      let score = usefulness(c, hand) * 100 - R.handPenalty(c);
+      if (tableMelds.some((m) => R.canAttach(m, c))) score += 900;
       if (score < pickScore) {
         pickScore = score;
         pick = c;
       }
     }
-    return pick;
+    return pick; // hand[0] survives only if everything else is a joker
   }
 
   /* Plan a full play phase. Returns an ordered action list:
@@ -233,7 +245,7 @@
     // Honour the "use what you took from the discard pile" rule: if the
     // taken card is still in hand, it must be the discard.
     const stuck = mustUseId != null && hand.some((c) => c.id === mustUseId);
-    const discard = stuck ? hand.find((c) => c.id === mustUseId) : chooseDiscard(hand);
+    const discard = stuck ? hand.find((c) => c.id === mustUseId) : chooseDiscard(hand, table);
     actions.push({ type: 'discard', cardId: discard.id });
     return actions;
   }
