@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GarageVault — Your collection, valued.</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">GV</span>
+      <span class="brand-name">GarageVault</span>
+    </div>
+    <div class="topbar-right">
+      <span id="collection-worth" class="worth-chip" hidden></span>
+      <button id="premium-btn" class="premium-chip">Go Premium · $2.99/mo</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="feed">Feed</button>
+    <button class="tab" data-view="garage">Garage</button>
+    <button class="tab" data-view="portfolio">Value</button>
+  </nav>
+
+  <main>
+    <section id="view-feed" class="view">
+      <div id="feed-list" class="feed-list"></div>
+    </section>
+
+    <section id="view-garage" class="view" hidden>
+      <div class="section-head">
+        <h2>Your Garage</h2>
+        <button id="add-car-btn" class="btn-primary">+ Add a car</button>
+      </div>
+      <div id="garage-list" class="garage-list"></div>
+    </section>
+
+    <section id="view-portfolio" class="view" hidden>
+      <div id="portfolio-summary" class="portfolio-summary"></div>
+      <div id="portfolio-list" class="portfolio-list"></div>
+    </section>
+  </main>
+
+  <!-- Add car modal -->
+  <div id="modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Add a car to your collection</h3>
+        <button id="modal-close" class="btn-ghost" aria-label="Close">✕</button>
+      </div>
+      <form id="car-form">
+        <div class="form-row">
+          <label>Year <input name="year" type="number" required placeholder="1969" min="1885"></label>
+          <label>Make <input name="make" type="text" required placeholder="Dodge"></label>
+        </div>
+        <div class="form-row">
+          <label>Model <input name="model" type="text" required placeholder="Charger"></label>
+          <label>Trim <input name="trim" type="text" placeholder="R/T (optional)"></label>
+        </div>
+        <div class="form-row">
+          <label>Condition
+            <select name="condition">
+              <option value="concours">Concours (#1)</option>
+              <option value="excellent">Excellent (#2)</option>
+              <option value="good" selected>Good (#3)</option>
+              <option value="fair">Fair (#4)</option>
+              <option value="project">Project (#5)</option>
+            </select>
+          </label>
+          <label>Mileage <input name="mileage" type="number" min="0" placeholder="54,000 (optional)"></label>
+        </div>
+        <div class="form-row">
+          <label>Purchase price ($) <input name="purchasePrice" type="number" min="0" placeholder="optional"></label>
+        </div>
+        <label class="full">Notes <textarea name="notes" rows="2" placeholder="Matching numbers, restored 2019… (optional)"></textarea></label>
+        <div id="valuation-preview" class="valuation-preview" hidden></div>
+        <div id="form-errors" class="form-errors" hidden></div>
+        <button type="submit" class="btn-primary full">Add to garage</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Premium modal -->
+  <div id="premium-modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>GarageVault Premium</h3>
+        <button id="premium-close" class="btn-ghost" aria-label="Close">✕</button>
+      </div>
+      <p class="premium-pitch">Everything a serious collector needs, for less than a quart of oil.</p>
+      <ul class="premium-list">
+        <li>Unlimited cars in your garage</li>
+        <li>Full 24-month value history &amp; trend alerts</li>
+        <li>Insurance-ready collection valuation reports</li>
+        <li>Priority editorial coverage of your exact models</li>
+      </ul>
+      <button id="premium-subscribe" class="btn-primary full">Subscribe — $2.99/month</button>
+      <p class="fine-print">Demo build: no payment is processed.</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
