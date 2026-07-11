@@ -2,19 +2,40 @@
 
 A playable, mobile-friendly implementation of **Scala 40** — the classic
 Italian 40-point rummy — with a retro **Game Boy-style monochrome LCD**
-look. Play against the computer or pass-and-play with a friend.
+look. Three modes: vs computer, pass-and-play, and **online multiplayer
+with room codes**.
 
-Built as a plain HTML/CSS/JS web app with zero dependencies, so it runs
-anywhere a browser runs and is ready to be wrapped into a native iOS/Android
-app with Capacitor (see below).
+The game itself is plain dependency-free HTML/CSS/JS, ready to be wrapped
+into a native iOS/Android app with Capacitor (see below). Online play adds
+one server dependency (`ws`).
 
 ## Play it
 
-Open `index.html` in any browser — that's it. For a local server:
+**Local modes** (vs CPU, pass-and-play): just open `index.html` in any
+browser.
+
+**With online multiplayer:**
 
 ```sh
-npx serve .        # or: python3 -m http.server
+npm install
+npm start          # serves the game + referee on http://localhost:3040
 ```
+
+One player taps **Online → Create room** and shares the 5-letter code;
+the other taps **Online**, enters the code, and joins. To play across the
+internet, deploy the server anywhere Node runs (Fly.io, Railway, a $5 VPS)
+— it's a single process serving both the static app and the WebSocket
+referee, so no extra configuration is needed.
+
+## How multiplayer stays fair
+
+The server is **authoritative**: it holds the real deck and both hands,
+validates every move through the same `js/engine.js` the browser uses for
+local play, and sends each client only a redacted view (your cards, the
+table, and the opponent's card *count*). A modified client can neither
+cheat nor peek — there is a unit test asserting no hidden card ever
+appears in a client view. Dropped connections rejoin automatically with a
+session token.
 
 ## Game rules implemented
 
@@ -38,17 +59,21 @@ than a multi-round points match.
 
 ## Project layout
 
-| Path                  | What it is                                             |
-| --------------------- | ------------------------------------------------------ |
-| `index.html`          | App shell and screens (menu, game, pass-device, end)   |
-| `css/style.css`       | Game Boy DMG theme (4-shade palette, scanlines)        |
-| `js/rules.js`         | Pure rules engine: deck, meld validation, attachments  |
-| `js/ai.js`            | Computer opponent: meld search, opening solver, plans  |
-| `js/game.js`          | Game state machine + DOM rendering + input             |
-| `test/rules.test.js`  | Unit tests for rules + AI (`node test/rules.test.js`)  |
+| Path                  | What it is                                              |
+| --------------------- | ------------------------------------------------------- |
+| `index.html`          | App shell and screens (menu, lobby, game, end)          |
+| `css/style.css`       | Game Boy DMG theme (4-shade palette, scanlines)         |
+| `js/rules.js`         | Meld validation, attachments, joker swaps, scoring      |
+| `js/engine.js`        | Game state machine: turns, opening, discards, winning   |
+| `js/ai.js`            | Computer opponent: meld search, opening solver, plans   |
+| `js/net.js`           | WebSocket client: rooms, actions, auto-reconnect        |
+| `js/game.js`          | Screens, rendering, input; routes moves to engine/net   |
+| `server/server.js`    | Static host + authoritative multiplayer referee         |
+| `test/`               | Unit tests for rules, AI, and engine (`npm test`)       |
 
-`rules.js` and `ai.js` are DOM-free and load in Node, so game logic is unit
-tested and could later back an online multiplayer server unchanged.
+`rules.js`, `engine.js`, and `ai.js` are DOM-free and run in both the
+browser and Node — local play, the server referee, and the tests all share
+the identical game logic.
 
 ## Shipping to the App Store (Capacitor)
 
@@ -67,10 +92,13 @@ Before submitting: add app icons and a splash screen, set
 Note that "Scala 40" is the traditional (public domain) game name, but
 check App Store availability for your exact app title.
 
+Note for online play from a Capacitor app: point `js/net.js` at your
+deployed server URL instead of `location.host`.
+
 ## Roadmap ideas
 
 - Multi-round scoring to 101/201 points
 - Difficulty levels for the AI
-- Online multiplayer (the rules engine is already server-ready)
+- Random matchmaking and rematches for online rooms
 - Sound effects, haptics, animations
 - Selectable palettes (original DMG green, gray "Pocket", inverted)

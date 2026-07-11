@@ -206,6 +206,74 @@ h2 {
   font-size: 1.05rem;
 }
 
+/* online lobby */
+
+#online-row {
+  display: grid;
+  gap: 10px;
+}
+
+.online-or {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.join-row {
+  display: flex;
+  gap: 8px;
+}
+
+.join-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 14px;
+  border: 3px solid var(--gb-light);
+  background: var(--gb-darkest);
+  color: var(--gb-lightest);
+  font-size: 1.1rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  text-align: center;
+  outline: none;
+}
+
+.join-row input:focus {
+  border-color: var(--gb-lightest);
+}
+
+.join-row button {
+  padding: 11px 18px;
+  border: 3px solid var(--gb-darkest);
+  background: var(--gb-lightest);
+  color: var(--gb-darkest);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+
+.online-msg {
+  min-height: 1.2em;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
+.room-code {
+  font-size: 2.2rem;
+  letter-spacing: 0.35em;
+  padding: 14px 0 14px 0.35em;
+  margin: 6px 0 14px;
+  border: 3px dashed var(--gb-lightest);
+  background: var(--gb-darkest);
+}
+
+.mode-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 #end-title {
   font-size: 1.5rem;
   margin-bottom: 6px;

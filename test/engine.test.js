@@ -1,0 +1,227 @@
+/* Node test suite for the Scala 40 game engine. Run: node test/engine.test.js */
+'use strict';
+
+const assert = require('assert');
+const R = require('../js/rules.js');
+const E = require('../js/engine.js');
+
+let n = 0;
+function t(name, fn) {
+  n++;
+  try {
+    fn();
+    console.log(`  ok ${n} - ${name}`);
+  } catch (e) {
+    console.error(`  FAIL ${n} - ${name}`);
+    console.error(e.message);
+    process.exitCode = 1;
+  }
+}
+
+let seq = 5000;
+const c = (rank, suit) => ({ id: seq++, rank, suit, joker: false });
+
+/* Build a deck whose deal is fully known. Dealing pops from the end,
+ * alternating p0/p1 thirteen times, then one card for the discard pile;
+ * later stock draws pop from the end of what remains. */
+function riggedDeck(p0, p1, discardTop, stockTopFirst) {
+  assert.strictEqual(p0.length, 13);
+  assert.strictEqual(p1.length, 13);
+  const stock = [...stockTopFirst].reverse(); // first element drawn first
+  const tail = [discardTop];
+  for (let i = 12; i >= 0; i--) {
+    tail.push(p1[i], p0[i]);
+  }
+  return [...stock, ...tail];
+}
+
+/* A p0 hand that can open: K♠ K♥ K♦ (30) + 5♣ 6♣ 7♣ (18) = 48. */
+function openingHand() {
+  return [
+    c(13, '♠'), c(13, '♥'), c(13, '♦'),
+    c(5, '♣'), c(6, '♣'), c(7, '♣'),
+    c(2, '♠'), c(9, '♥'), c(4, '♦'), c(10, '♣'),
+    c(3, '♠'), c(8, '♥'), c(2, '♥'),
+  ];
+}
+
+function junkHand() {
+  return [
+    c(2, '♦'), c(4, '♠'), c(6, '♥'), c(8, '♦'), c(10, '♠'),
+    c(12, '♥'), c(3, '♣'), c(5, '♠'), c(7, '♦'), c(9, '♣'),
+    c(11, '♥'), c(13, '♣'), c(4, '♥'),
+  ];
+}
+
+function riggedGame(opts) {
+  opts = opts || {};
+  const p0 = opts.p0 || openingHand();
+  const p1 = opts.p1 || junkHand();
+  const discardTop = opts.discardTop || c(9, '♦');
+  const stock = opts.stock || [c(2, '♣'), c(6, '♦'), c(10, '♥'), c(3, '♦'), c(11, '♦')];
+  const deck = riggedDeck(p0, p1, discardTop, stock);
+  const S = E.newGame(['Anna', 'Bruno'], { deck, firstTurn: 0 });
+  return { S, p0, p1, discardTop, stock };
+}
+
+/* ---- dealing ---- */
+t('deal gives 13 cards each, one discard, known stock order', () => {
+  const { S, p0, p1, discardTop, stock } = riggedGame();
+  assert.deepStrictEqual(S.players[0].hand.map((x) => x.id), p0.map((x) => x.id));
+  assert.deepStrictEqual(S.players[1].hand.map((x) => x.id), p1.map((x) => x.id));
+  assert.strictEqual(S.discard[0].id, discardTop.id);
+  const draw = E.actions.drawStock(S, 0);
+  assert.strictEqual(draw.card.id, stock[0].id);
+});
+
+/* ---- guards ---- */
+t('acting out of turn or phase is rejected', () => {
+  const { S } = riggedGame();
+  assert.strictEqual(E.actions.drawStock(S, 1).ok, false);
+  assert.strictEqual(E.actions.discard(S, 0, S.players[0].hand[0].id).ok, false); // draw first
+  assert.strictEqual(E.actions.layMeld(S, 0, []).ok, false);
+  E.actions.drawStock(S, 0);
+  assert.strictEqual(E.actions.drawStock(S, 0).ok, false); // already drew
+});
+
+/* ---- opening ---- */
+t('a 40+ opening in one turn opens the player and flips the turn', () => {
+  const { S } = riggedGame();
+  E.actions.drawStock(S, 0);
+  const h = S.players[0].hand;
+  const kings = h.filter((x) => x.rank === 13).map((x) => x.id);
+  const run = h.filter((x) => x.suit === '♣' && x.rank >= 5 && x.rank <= 7).map((x) => x.id);
+  assert(E.actions.layMeld(S, 0, kings).ok);
+  assert(E.actions.layMeld(S, 0, run).ok);
+  assert.strictEqual(E.provisionalPoints(S), 48);
+  assert.strictEqual(S.players[0].opened, false);
+  const res = E.actions.discard(S, 0, S.players[0].hand[0].id);
+  assert(res.ok && res.openedNow && !res.won);
+  assert.strictEqual(S.players[0].opened, true);
+  assert(S.melds.every((m) => !m.provisional));
+  assert.strictEqual(S.turn, 1);
+  assert.strictEqual(S.phase, 'draw');
+});
+
+t('a partial opening blocks the discard until taken back', () => {
+  const { S } = riggedGame();
+  E.actions.drawStock(S, 0);
+  const kings = S.players[0].hand.filter((x) => x.rank === 13).map((x) => x.id);
+  assert(E.actions.layMeld(S, 0, kings).ok); // 30 points only
+  const res = E.actions.discard(S, 0, S.players[0].hand[0].id);
+  assert.strictEqual(res.ok, false);
+  assert(/40/.test(res.error));
+  assert(E.actions.takeBack(S, 0).ok);
+  assert.strictEqual(S.players[0].hand.length, 14);
+  assert(E.actions.discard(S, 0, S.players[0].hand[0].id).ok);
+});
+
+t('attaching before opening is rejected', () => {
+  const { S } = riggedGame();
+  E.actions.drawStock(S, 0);
+  const kings = S.players[0].hand.filter((x) => x.rank === 13).map((x) => x.id);
+  E.actions.layMeld(S, 0, kings);
+  const meldId = S.melds[0].id;
+  const res = E.actions.attach(S, 0, S.players[0].hand[0].id, meldId);
+  assert.strictEqual(res.ok, false);
+});
+
+/* ---- discard pickup rule ---- */
+t('the picked-up discard must be used (or discarded back)', () => {
+  const { S } = riggedGame({ discardTop: c(9, '♦') });
+  const picked = E.actions.pickDiscard(S, 0);
+  assert(picked.ok);
+  const otherCard = S.players[0].hand.find((x) => x.id !== picked.card.id);
+  const blocked = E.actions.discard(S, 0, otherCard.id);
+  assert.strictEqual(blocked.ok, false);
+  assert(/discard pile/.test(blocked.error));
+  // escape hatch: discarding the same card back is allowed
+  assert(E.actions.discard(S, 0, picked.card.id).ok);
+});
+
+t('undo pickup works only before acting, then forces the stock', () => {
+  const { S } = riggedGame();
+  const picked = E.actions.pickDiscard(S, 0);
+  assert(E.actions.undoPickup(S, 0).ok);
+  assert.strictEqual(S.discard[S.discard.length - 1].id, picked.card.id);
+  assert.strictEqual(E.actions.pickDiscard(S, 0).ok, false); // mustStock
+  assert(E.actions.drawStock(S, 0).ok);
+});
+
+/* ---- attach + joker swap after opening ---- */
+t('after opening: attach to any meld and swap table jokers', () => {
+  // p0 opens with K-K-K + 5-6-7♣, holds 8♣ to attach next turn and
+  // a 9♦ matching the joker p1... simpler: p0 attaches to own run.
+  const p0 = openingHand();
+  p0[12] = c(8, '♣'); // replaces junk with an attachable card
+  const { S } = riggedGame({ p0 });
+  E.actions.drawStock(S, 0);
+  const h = S.players[0].hand;
+  E.actions.layMeld(S, 0, h.filter((x) => x.rank === 13).map((x) => x.id));
+  E.actions.layMeld(S, 0, h.filter((x) => x.suit === '♣' && x.rank >= 5 && x.rank <= 7).map((x) => x.id));
+  E.actions.discard(S, 0, S.players[0].hand.find((x) => x.rank === 2).id);
+  // p1 turn: draw + discard
+  E.actions.drawStock(S, 1);
+  E.actions.discard(S, 1, S.players[1].hand[0].id);
+  // p0 turn: attach 8♣ to the 5-6-7♣ run
+  E.actions.drawStock(S, 0);
+  const run = S.melds.find((m) => m.type === 'run');
+  const eight = S.players[0].hand.find((x) => x.rank === 8 && x.suit === '♣');
+  assert(E.actions.attach(S, 0, eight.id, run.id).ok);
+  assert.strictEqual(run.slots.length, 4);
+});
+
+/* ---- winning ---- */
+t('discarding the last card wins the game', () => {
+  const { S } = riggedGame();
+  E.actions.drawStock(S, 0);
+  const h = S.players[0].hand;
+  E.actions.layMeld(S, 0, h.filter((x) => x.rank === 13).map((x) => x.id));
+  E.actions.layMeld(S, 0, h.filter((x) => x.suit === '♣' && x.rank >= 5 && x.rank <= 7).map((x) => x.id));
+  E.actions.discard(S, 0, S.players[0].hand[0].id);
+  // force p0's hand to one card to close quickly
+  S.players[1].hand.push(...S.players[0].hand.splice(1));
+  E.actions.drawStock(S, 1);
+  E.actions.discard(S, 1, S.players[1].hand[0].id);
+  E.actions.drawStock(S, 0);
+  const keep = S.players[0].hand[0];
+  S.players[1].hand.push(...S.players[0].hand.splice(1)); // hand back to 1 card
+  const res = E.actions.discard(S, 0, keep.id);
+  assert(res.ok && res.won);
+  assert.strictEqual(S.over, true);
+  assert.strictEqual(S.winner, 0);
+});
+
+/* ---- view redaction ---- */
+t('a view never leaks the opponent hand or the stock', () => {
+  const { S } = riggedGame();
+  const v1 = E.view(S, 1);
+  assert.strictEqual(v1.hand.length, 13);
+  assert.deepStrictEqual(
+    v1.hand.map((x) => x.id),
+    S.players[1].hand.map((x) => x.id)
+  );
+  assert.strictEqual(typeof v1.players[0].handCount, 'number');
+  assert.strictEqual(v1.players[0].hand, undefined);
+  assert.strictEqual(v1.stock, undefined);
+  assert.strictEqual(typeof v1.stockCount, 'number');
+  const json = JSON.stringify(v1);
+  const hiddenIds = S.players[0].hand.map((x) => `"id":${x.id}`);
+  for (const needle of hiddenIds) {
+    assert(!json.includes(needle), 'opponent card leaked into view');
+  }
+});
+
+t('stock recycles the discard pile when exhausted', () => {
+  const { S } = riggedGame();
+  // drain the stock into p1's hand (test-only surgery)
+  S.players[1].hand.push(...S.stock.splice(0));
+  S.discard.push(c(4, '♣'), c(9, '♠'));
+  const before = S.discard.length;
+  const res = E.actions.drawStock(S, 0);
+  assert(res.ok);
+  assert.strictEqual(S.discard.length, 1); // only the top stayed
+  assert.strictEqual(S.stock.length, before - 2); // rest became stock, one drawn
+});
+
+console.log(`\n${n} tests run`);

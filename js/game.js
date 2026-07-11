@@ -1,217 +1,88 @@
 /*
- * Scala 40 — game engine + UI.
- * Owns the game state (players, stock, discard, table melds, turn
- * phases), enforces the rules of play, drives the AI opponent and
- * renders everything to the DOM.
+ * Scala 40 — UI controller.
+ * Renders a per-player view model and routes every player action either
+ * to the local Engine (vs CPU / pass-and-play) or over the network to
+ * the multiplayer server (online rooms). All rule enforcement lives in
+ * js/engine.js; this file is screens, clicks and messages.
  */
 (function () {
   'use strict';
 
   const R = window.Rules;
   const AI = window.AI;
+  const E = window.Engine;
 
-  let S = null; // game state
+  let MODE = null;   // 'local' | 'net'
+  let LOCAL = null;  // { mode: 'pvc' | 'pvp' }
+  let S = null;      // full engine state (local mode only)
+
   const view = {
     selected: new Set(), // selected card ids in the current hand
-    newCardId: null,     // last drawn card, briefly highlighted
     msg: '',
   };
 
   const $ = (id) => document.getElementById(id);
 
-  /* ================= state ================= */
+  /* ================= view model ================= */
 
-  function newGame(mode, name1, name2) {
-    const deck = R.shuffle(R.makeDeck());
-    const players = [
-      { name: name1, hand: [], opened: false, isAI: false },
-      { name: name2, hand: [], opened: false, isAI: mode === 'pvc' },
-    ];
-    for (let i = 0; i < 13; i++) {
-      for (const p of players) p.hand.push(deck.pop());
-    }
-    S = {
-      mode,
-      players,
-      stock: deck,
-      discard: [deck.pop()],
-      melds: [],
-      meldSeq: 1,
-      turn: Math.floor(Math.random() * 2),
-      phase: 'draw',      // 'draw' -> 'play'
-      picked: null,       // id of card taken from the discard pile this turn
-      mustStock: false,   // set after undoing a pickup
-      actedAfterPick: false,
-      provisional: [],    // meld ids laid this turn by a not-yet-opened player
-      over: false,
-      winner: null,
-    };
-    view.selected.clear();
-    view.newCardId = null;
-    setMsg('');
+  function localYou() {
+    if (LOCAL.mode === 'pvc') return 0;
+    return S.turn; // pass-and-play: the bottom hand is always whoever plays
   }
 
-  const cur = () => S.players[S.turn];
-  const other = () => S.players[1 - S.turn];
-  const isHumanTurn = () => !cur().isAI && !S.over;
+  function getVM() {
+    if (MODE === 'net') return window.NET.view;
+    return S ? E.view(S, localYou()) : null;
+  }
 
-  function provisionalPoints() {
-    return S.melds
-      .filter((m) => m.provisional)
-      .reduce((s, m) => s + m.points, 0);
+  function isMyTurn(vm) {
+    if (!vm || vm.over) return false;
+    if (MODE === 'net') return vm.turn === vm.you;
+    if (LOCAL.mode === 'pvc') return vm.turn === 0;
+    return true;
   }
 
   function setMsg(text) {
     view.msg = text;
   }
 
-  function removeFromHand(player, ids) {
-    const idSet = new Set(ids);
-    player.hand = player.hand.filter((c) => !idSet.has(c.id));
-  }
+  /* ================= acting ================= */
 
-  /* ================= turn actions ================= */
-
-  function recycleStockIfNeeded() {
-    if (S.stock.length > 0) return;
-    const top = S.discard.pop();
-    S.stock = R.shuffle(S.discard);
-    S.discard = top ? [top] : [];
-  }
-
-  function drawFromStock() {
-    recycleStockIfNeeded();
-    const card = S.stock.pop();
-    cur().hand.push(card);
-    view.newCardId = card.id;
-    S.phase = 'play';
-    return card;
-  }
-
-  function pickFromDiscard() {
-    const card = S.discard.pop();
-    cur().hand.push(card);
-    view.newCardId = card.id;
-    S.picked = card.id;
-    S.actedAfterPick = false;
-    S.phase = 'play';
-    return card;
-  }
-
-  function undoPickup() {
-    const p = cur();
-    const card = p.hand.find((c) => c.id === S.picked);
-    removeFromHand(p, [card.id]);
-    S.discard.push(card);
-    S.picked = null;
-    S.mustStock = true;
-    S.phase = 'draw';
-    view.newCardId = null;
-  }
-
-  // Lay a new meld from the current player's hand. Returns an error
-  // message, or null on success.
-  function layMeld(cardIds) {
-    const p = cur();
-    const cards = p.hand.filter((c) => cardIds.includes(c.id));
-    if (cards.length !== cardIds.length) return 'Card not in hand.';
-    if (cards.length === p.hand.length) return 'You must keep a card to discard.';
-    const m = R.validateMeld(cards);
-    if (!m) return 'Not a valid meld: 3+ same rank (different suits) or 3+ in a row of one suit, max one joker.';
-    const meld = { id: S.meldSeq++, owner: S.turn, provisional: !p.opened, ...m };
-    S.melds.push(meld);
-    removeFromHand(p, cardIds);
-    if (meld.provisional) S.provisional.push(meld.id);
-    if (S.picked != null) S.actedAfterPick = true;
-    return null;
-  }
-
-  function attachCard(cardId, meldId) {
-    const p = cur();
-    if (!p.opened) return 'You can attach cards only after opening (in an earlier turn).';
-    if (p.hand.length <= 1) return 'You must keep a card to discard.';
-    const card = p.hand.find((c) => c.id === cardId);
-    const meld = S.melds.find((m) => m.id === meldId);
-    if (!card || !meld) return 'Nothing to attach.';
-    if (!R.applyAttach(meld, card)) return `${R.cardLabel(card)} does not fit on that meld.`;
-    removeFromHand(p, [card.id]);
-    if (S.picked != null) S.actedAfterPick = true;
-    return null;
-  }
-
-  function replaceJoker(cardId, meldId) {
-    const p = cur();
-    if (!p.opened) return 'You can swap jokers only after opening.';
-    const card = p.hand.find((c) => c.id === cardId);
-    const meld = S.melds.find((m) => m.id === meldId);
-    if (!card || !meld) return 'Nothing to swap.';
-    const joker = R.applyReplaceJoker(meld, card);
-    if (!joker) return 'That card cannot replace the joker.';
-    removeFromHand(p, [card.id]);
-    p.hand.push(joker);
-    if (S.picked != null) S.actedAfterPick = true;
-    return null;
-  }
-
-  function takeBackProvisional() {
-    const p = cur();
-    const ids = new Set(S.provisional);
-    for (const m of S.melds.filter((x) => ids.has(x.id))) {
-      for (const s of m.slots) p.hand.push(s.card);
+  // Route an action to the engine (local) or the server (net). Local
+  // calls return the engine result; net calls return { async: true }
+  // and the server answers with a fresh state or an error message.
+  function act(name, args) {
+    args = args || {};
+    if (MODE === 'net') {
+      window.NET.action(name, args);
+      return { ok: true, async: true };
     }
-    S.melds = S.melds.filter((m) => !ids.has(m.id));
-    S.provisional = [];
-    S.actedAfterPick = false;
+    const p = S.turn;
+    const A = E.actions;
+    switch (name) {
+      case 'drawStock': return A.drawStock(S, p);
+      case 'pickDiscard': return A.pickDiscard(S, p);
+      case 'undoPickup': return A.undoPickup(S, p);
+      case 'layMeld': return A.layMeld(S, p, args.cardIds);
+      case 'attach': return A.attach(S, p, args.cardId, args.meldId);
+      case 'replaceJoker': return A.replaceJoker(S, p, args.cardId, args.meldId);
+      case 'takeBack': return A.takeBack(S, p);
+      case 'discard': return A.discard(S, p, args.cardId);
+      default: return { ok: false, error: 'Unknown action.' };
+    }
   }
 
-  // Returns an error message, or null if the discard ended the turn.
-  function discardCard(cardId) {
-    const p = cur();
-    const card = p.hand.find((c) => c.id === cardId);
-    if (!card) return 'Card not in hand.';
-
-    const pts = provisionalPoints();
-    if (pts > 0 && pts < 40) {
-      return `Opening needs 40+ points — you have ${pts}. Lay more melds or take them back.`;
+  // Local-mode flow after a successful discard: end, AI turn, or pass.
+  function afterLocalDiscard(res) {
+    if (S.over) {
+      showEndScreen();
+      return;
     }
-    if (S.picked != null && cardId !== S.picked && p.hand.some((c) => c.id === S.picked)) {
-      return 'Meld the card you took from the discard pile first (or discard that same card).';
-    }
-
-    if (pts >= 40) {
-      p.opened = true;
-      for (const m of S.melds) if (m.provisional) m.provisional = false;
-      S.provisional = [];
-    }
-
-    removeFromHand(p, [card.id]);
-    S.discard.push(card);
-    view.selected.clear();
-    view.newCardId = null;
-
-    if (p.hand.length === 0) {
-      endGame(S.turn);
-      return null;
-    }
-    nextTurn();
-    return null;
-  }
-
-  function nextTurn() {
-    S.turn = 1 - S.turn;
-    S.phase = 'draw';
-    S.picked = null;
-    S.mustStock = false;
-    S.actedAfterPick = false;
-    S.provisional = [];
-    view.selected.clear();
-    view.newCardId = null;
-
-    if (cur().isAI) {
-      setMsg(`${cur().name} is thinking…`);
+    if (LOCAL.mode === 'pvc' && S.turn === 1) {
+      setMsg((res.openedNow ? 'You opened! ' : '') + 'Computer is thinking…');
       render();
       aiTurn();
-    } else if (S.mode === 'pvp') {
+    } else if (LOCAL.mode === 'pvp') {
       showPassScreen();
     } else {
       setMsg('Your turn — draw from the stock or the discard pile.');
@@ -219,68 +90,64 @@
     }
   }
 
-  function endGame(winnerIdx) {
-    S.over = true;
-    S.winner = winnerIdx;
-    render();
-    showEndScreen();
-  }
-
-  /* ================= AI turn ================= */
+  /* ================= AI turn (local pvc only) ================= */
 
   function aiTurn() {
-    const p = cur();
+    const p = S.players[1];
     setTimeout(() => {
-      if (S.over) return;
+      if (!S || S.over) return;
       const choice = AI.chooseDraw(S, p);
       if (choice === 'discard') {
-        const card = pickFromDiscard();
-        setMsg(`${p.name} takes ${R.cardLabel(card)} from the discard pile.`);
+        const res = E.actions.pickDiscard(S, 1);
+        setMsg(`Computer takes ${R.cardLabel(res.card)} from the discard pile.`);
       } else {
-        drawFromStock();
-        setMsg(`${p.name} draws from the stock.`);
+        E.actions.drawStock(S, 1);
+        setMsg('Computer draws from the stock.');
       }
       render();
       setTimeout(() => {
-        if (S.over) return;
+        if (!S || S.over) return;
         const plan = AI.planPlay(S, p, S.picked);
-        execAIPlan(plan, 0, p.opened);
+        execAIPlan(plan, 0);
       }, 800);
     }, 800);
   }
 
-  function execAIPlan(plan, i, wasOpened) {
-    if (S.over || i >= plan.length) return;
-    const p = cur();
+  function execAIPlan(plan, i) {
+    if (!S || S.over || i >= plan.length) return;
+    const p = S.players[1];
     const a = plan[i];
 
     if (a.type === 'meld') {
-      layMeld(a.cardIds);
-      const laid = S.melds[S.melds.length - 1];
-      const label = laid.slots.map((s) => R.cardLabel(s.card)).join(' ');
-      setMsg(`${p.name} plays ${label}.`);
+      const res = E.actions.layMeld(S, 1, a.cardIds);
+      if (res.ok) {
+        const label = res.meld.slots.map((s) => R.cardLabel(s.card)).join(' ');
+        setMsg(`Computer plays ${label}.`);
+      }
     } else if (a.type === 'attach') {
       const card = p.hand.find((c) => c.id === a.cardId);
-      const target = S.melds.find((m) => m.id != null && R.canAttach(m, card));
+      const target = card && S.melds.find((m) => R.canAttach(m, card));
       if (target) {
-        R.applyAttach(target, card);
-        removeFromHand(p, [card.id]);
-        setMsg(`${p.name} attaches ${R.cardLabel(card)}.`);
+        E.actions.attach(S, 1, card.id, target.id);
+        setMsg(`Computer attaches ${R.cardLabel(card)}.`);
       }
     } else if (a.type === 'discard') {
-      const card = p.hand.find((c) => c.id === a.cardId) || p.hand[p.hand.length - 1];
-      const opensNow = !wasOpened && provisionalPoints() >= 40;
-      discardCard(card.id);
-      if (S.over) return;
-      setMsg(
-        (opensNow ? `${p.name} opened! ` : '') +
-          `${p.name} discards ${R.cardLabel(card)}. Your turn.`
-      );
+      const res = E.actions.discard(S, 1, a.cardId);
+      if (res.ok) {
+        if (S.over) {
+          showEndScreen();
+          return;
+        }
+        setMsg(
+          (res.openedNow ? 'Computer opened! ' : '') +
+            `Computer discards ${R.cardLabel(res.card)}. Your turn.`
+        );
+      }
       render();
       return;
     }
     render();
-    setTimeout(() => execAIPlan(plan, i + 1, wasOpened), 750);
+    setTimeout(() => execAIPlan(plan, i + 1), 750);
   }
 
   /* ================= rendering ================= */
@@ -288,16 +155,18 @@
   // Monochrome deck: hearts and diamonds render hollow instead of red.
   const suitGlyph = (suit) => ({ '♥': '♡', '♦': '♢' }[suit] || suit);
 
-  function cardEl(card, { faceDown = false, small = false } = {}) {
+  function cardEl(card, opts) {
+    opts = opts || {};
     const el = document.createElement('div');
-    el.className = 'card' + (small ? ' small' : '');
-    if (faceDown) {
+    el.className = 'card' + (opts.small ? ' small' : '');
+    if (opts.faceDown) {
       el.classList.add('back');
       return el;
     }
     if (card.joker) {
       el.classList.add('joker');
-      el.innerHTML = '<span class="corner">★</span><span class="pip">★</span><span class="jlabel">JOKER</span>';
+      el.innerHTML =
+        '<span class="corner">★</span><span class="pip">★</span><span class="jlabel">JOKER</span>';
     } else {
       el.classList.add(R.isRed(card) ? 'red' : 'black');
       const r = R.rankName(card.rank);
@@ -308,37 +177,37 @@
     return el;
   }
 
-  function viewIndex() {
-    if (S.mode === 'pvc') return 0;
-    return cur().isAI ? 0 : S.turn;
-  }
-
   function render() {
-    if (!S) return;
-    const me = S.players[viewIndex()];
-    const opp = S.players[1 - viewIndex()];
+    const vm = getVM();
+    if (!vm) return;
+    const me = vm.players[vm.you];
+    const opp = vm.players[1 - vm.you];
+
+    // prune stale selections
+    const handIds = new Set(vm.hand.map((c) => c.id));
+    for (const id of [...view.selected]) if (!handIds.has(id)) view.selected.delete(id);
 
     // opponent bar
     $('opp-name').textContent = opp.name;
-    $('opp-count').textContent = `${opp.hand.length} cards`;
+    $('opp-count').textContent = `${opp.handCount} cards`;
     $('opp-opened').textContent = opp.opened ? 'opened' : 'not opened';
     $('opp-opened').classList.toggle('on', opp.opened);
     const oppHand = $('opp-hand');
     oppHand.innerHTML = '';
-    for (let i = 0; i < opp.hand.length; i++) {
+    for (let i = 0; i < opp.handCount; i++) {
       oppHand.appendChild(cardEl(null, { faceDown: true, small: true }));
     }
 
     // table melds
     const meldsBox = $('melds');
     meldsBox.innerHTML = '';
-    if (S.melds.length === 0) {
+    if (vm.melds.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'table-hint';
       empty.textContent = 'Melds land here — open with 40+ points';
       meldsBox.appendChild(empty);
     }
-    for (const m of S.melds) {
+    for (const m of vm.melds) {
       const g = document.createElement('div');
       g.className = 'meld' + (m.provisional ? ' provisional' : '');
       g.dataset.mid = m.id;
@@ -352,18 +221,18 @@
       }
       const tag = document.createElement('span');
       tag.className = 'meld-owner';
-      tag.textContent = S.players[m.owner].name + (m.provisional ? ` · opening ${m.points}` : '');
+      tag.textContent =
+        vm.players[m.owner].name + (m.provisional ? ` · opening ${m.points}` : '');
       g.appendChild(tag);
       g.addEventListener('click', () => onMeldClick(m.id));
       meldsBox.appendChild(g);
     }
 
     // piles
-    $('stock-count').textContent = S.stock.length;
+    $('stock-count').textContent = vm.stockCount;
     const discardBox = $('discard');
     discardBox.innerHTML = '';
-    const top = S.discard[S.discard.length - 1];
-    if (top) discardBox.appendChild(cardEl(top));
+    if (vm.discardTop) discardBox.appendChild(cardEl(vm.discardTop));
     else {
       const ph = document.createElement('div');
       ph.className = 'card outline';
@@ -374,54 +243,57 @@
     $('me-name').textContent = me.name;
     $('me-opened').textContent = me.opened ? 'opened' : 'not opened';
     $('me-opened').classList.toggle('on', me.opened);
-    const pts = provisionalPoints();
+    const myTurn = isMyTurn(vm);
     $('me-open-pts').textContent =
-      !me.opened && pts > 0 && isHumanTurn() && S.players[S.turn] === me
-        ? `opening: ${pts}/40`
+      !me.opened && vm.provisionalPoints > 0 && myTurn
+        ? `opening: ${vm.provisionalPoints}/40`
         : '';
 
     const handBox = $('hand');
     handBox.innerHTML = '';
-    for (const c of me.hand) {
+    for (const c of vm.hand) {
       const el = cardEl(c);
       if (view.selected.has(c.id)) el.classList.add('selected');
-      if (c.id === view.newCardId) el.classList.add('fresh');
+      if (c.id === vm.newCardId) el.classList.add('fresh');
       el.addEventListener('click', () => onHandCardClick(c.id));
       handBox.appendChild(el);
     }
 
     // buttons
-    const myTurn = isHumanTurn() && S.players[S.turn] === me;
-    const playPhase = myTurn && S.phase === 'play';
+    const playPhase = myTurn && vm.phase === 'play';
     $('btn-meld').disabled = !playPhase || view.selected.size < 3;
     $('btn-discard').disabled = !playPhase || view.selected.size !== 1;
-    $('btn-takeback').classList.toggle('hidden', !(playPhase && S.provisional.length > 0));
+    $('btn-takeback').classList.toggle('hidden', !(playPhase && vm.provisionalCount > 0));
     $('btn-undopick').classList.toggle(
       'hidden',
-      !(playPhase && S.picked != null && !S.actedAfterPick)
+      !(playPhase && vm.picked != null && !vm.actedAfterPick)
     );
 
-    // turn / phase indicator
+    // hint line
     let hint = view.msg;
     if (!hint && myTurn) {
       hint =
-        S.phase === 'draw'
+        vm.phase === 'draw'
           ? 'Draw from the stock or take the discard.'
           : 'Play melds, attach cards, then discard one card to end your turn.';
     }
+    if (!hint && !myTurn && MODE === 'net' && !vm.over) {
+      hint = `Waiting for ${opp.name}…`;
+    }
     $('msgbar').textContent = hint;
-    $('stock').classList.toggle('clickable', myTurn && S.phase === 'draw');
+    $('stock').classList.toggle('clickable', myTurn && vm.phase === 'draw');
     $('discard').classList.toggle(
       'clickable',
-      myTurn && (S.phase === 'draw' || view.selected.size === 1)
+      myTurn && (vm.phase === 'draw' || view.selected.size === 1)
     );
   }
 
   /* ================= human interactions ================= */
 
   function onHandCardClick(cardId) {
-    if (!isHumanTurn()) return;
-    if (S.phase !== 'play') {
+    const vm = getVM();
+    if (!isMyTurn(vm)) return;
+    if (vm.phase !== 'play') {
       setMsg('Draw a card first.');
       render();
       return;
@@ -433,94 +305,116 @@
   }
 
   function onStockClick() {
-    if (!isHumanTurn()) return;
-    if (S.phase !== 'draw') {
+    const vm = getVM();
+    if (!isMyTurn(vm)) return;
+    if (vm.phase !== 'draw') {
       setMsg('You already drew this turn.');
       render();
       return;
     }
-    drawFromStock();
-    setMsg('');
+    const res = act('drawStock');
+    if (!res.async) setMsg(res.ok ? '' : res.error);
     render();
   }
 
   function onDiscardClick() {
-    if (!isHumanTurn()) return;
-    if (S.phase === 'draw') {
-      if (S.mustStock) {
-        setMsg('You put that card back — draw from the stock.');
-      } else if (S.discard.length === 0) {
-        setMsg('The discard pile is empty.');
-      } else {
-        pickFromDiscard();
-        setMsg('You must use this card in a meld before your discard (or discard it back).');
+    const vm = getVM();
+    if (!isMyTurn(vm)) return;
+    if (vm.phase === 'draw') {
+      const res = act('pickDiscard');
+      if (!res.async) {
+        setMsg(
+          res.ok
+            ? 'You must use this card in a meld before your discard (or discard it back).'
+            : res.error
+        );
       }
       render();
       return;
     }
-    // play phase: one selected card -> discard it onto the pile
-    if (view.selected.size === 1) {
-      onDiscardButton();
-    }
+    if (view.selected.size === 1) onDiscardButton();
   }
 
   function onMeldClick(meldId) {
-    if (!isHumanTurn() || S.phase !== 'play' || view.selected.size === 0) return;
+    const vm = getVM();
+    if (!isMyTurn(vm) || vm.phase !== 'play' || view.selected.size === 0) return;
+    const me = vm.players[vm.you];
+    const meld = vm.melds.find((m) => m.id === meldId);
     const ids = [...view.selected];
 
-    // Single card: try a joker swap first (it wins the player a joker),
-    // then a plain attach.
-    if (ids.length === 1) {
-      const meld = S.melds.find((m) => m.id === meldId);
-      const card = cur().hand.find((c) => c.id === ids[0]);
-      if (meld && card && cur().opened && R.canReplaceJoker(meld, card)) {
-        const err = replaceJoker(ids[0], meldId);
-        setMsg(err || 'You swapped the joker into your hand!');
-        if (!err) view.selected.clear();
-        render();
+    // Single card on a meld with a joker: swapping the joker out beats
+    // attaching, so try that first.
+    if (ids.length === 1 && me.opened && meld) {
+      const card = vm.hand.find((c) => c.id === ids[0]);
+      if (card && R.canReplaceJoker(meld, card)) {
+        const res = act('replaceJoker', { cardId: ids[0], meldId });
+        if (!res.async) {
+          setMsg(res.ok ? 'You swapped the joker into your hand!' : res.error);
+          if (res.ok) view.selected.clear();
+          render();
+        } else {
+          view.selected.clear();
+        }
         return;
       }
     }
 
-    // Attach each selected card, repeating until no more fit (so 8♥ 9♥
-    // can both go onto a 5-6-7♥ run in one tap).
-    let attachedAny = false;
+    if (!me.opened) {
+      setMsg('You can attach cards only after you have opened.');
+      render();
+      return;
+    }
+
+    // Work out an attach order that fits (so 8♡ 9♡ both land on 5-6-7♡
+    // in one tap) by simulating on a clone, then send that sequence.
+    const clone = meld && { ...meld, slots: meld.slots.map((s) => ({ ...s })) };
+    const sequence = [];
     let progress = true;
-    while (progress) {
+    while (clone && progress) {
       progress = false;
-      for (const id of [...view.selected]) {
-        const err = attachCard(id, meldId);
-        if (!err) {
-          view.selected.delete(id);
-          attachedAny = true;
+      for (const id of ids) {
+        if (sequence.includes(id)) continue;
+        const card = vm.hand.find((c) => c.id === id);
+        if (card && R.canAttach(clone, card)) {
+          R.applyAttach(clone, card);
+          sequence.push(id);
           progress = true;
         }
       }
     }
-    if (attachedAny) {
-      setMsg(view.selected.size ? 'Some selected cards did not fit.' : '');
-    } else {
-      const meld = S.melds.find((m) => m.id === meldId);
-      const card = cur().hand.find((c) => c.id === ids[0]);
-      setMsg(
-        !cur().opened
-          ? 'You can attach cards only after you have opened.'
-          : `${card ? R.cardLabel(card) : 'That card'} does not fit on that meld.`
-      );
+    if (sequence.length === 0) {
+      const card = vm.hand.find((c) => c.id === ids[0]);
+      setMsg(`${card ? R.cardLabel(card) : 'That card'} does not fit on that meld.`);
+      render();
+      return;
     }
+    let lastError = null;
+    for (const id of sequence) {
+      const res = act('attach', { cardId: id, meldId });
+      if (!res.async && !res.ok) lastError = res.error;
+      else view.selected.delete(id);
+    }
+    setMsg(
+      lastError || (view.selected.size ? 'Some selected cards did not fit.' : '')
+    );
     render();
   }
 
   function onMeldButton() {
-    if (!isHumanTurn() || S.phase !== 'play') return;
-    const err = layMeld([...view.selected]);
-    if (err) {
-      setMsg(err);
+    const vm = getVM();
+    if (!isMyTurn(vm) || vm.phase !== 'play') return;
+    const res = act('layMeld', { cardIds: [...view.selected] });
+    if (res.async) {
+      view.selected.clear();
+      return;
+    }
+    if (!res.ok) {
+      setMsg(res.error);
     } else {
       view.selected.clear();
-      const pts = provisionalPoints();
+      const pts = E.provisionalPoints(S);
       setMsg(
-        cur().opened
+        S.players[S.turn].opened
           ? 'Meld played.'
           : pts >= 40
             ? `Opening total ${pts} — discard to confirm your opening.`
@@ -531,45 +425,47 @@
   }
 
   function onDiscardButton() {
-    if (!isHumanTurn() || S.phase !== 'play' || view.selected.size !== 1) return;
+    const vm = getVM();
+    if (!isMyTurn(vm) || vm.phase !== 'play' || view.selected.size !== 1) return;
     const id = [...view.selected][0];
-    const p = cur();
-    const willOpen = !p.opened && provisionalPoints() >= 40;
-    const err = discardCard(id);
-    if (err) {
-      setMsg(err);
+    const res = act('discard', { cardId: id });
+    if (res.async) return;
+    if (!res.ok) {
+      setMsg(res.error);
       render();
-    } else if (!S.over && willOpen) {
-      // message for the *next* human render in pvp is handled by nextTurn
-      if (S.mode === 'pvc') setMsg('You opened! ' + view.msg);
-      render();
+      return;
     }
+    view.selected.clear();
+    afterLocalDiscard(res);
   }
 
   function onTakeBack() {
-    if (!isHumanTurn() || S.phase !== 'play') return;
-    takeBackProvisional();
-    setMsg('Opening melds returned to your hand.');
+    const vm = getVM();
+    if (!isMyTurn(vm) || vm.phase !== 'play') return;
+    const res = act('takeBack');
+    if (!res.async) setMsg(res.ok ? 'Opening melds returned to your hand.' : res.error);
     render();
   }
 
   function onUndoPick() {
-    if (!isHumanTurn() || S.picked == null || S.actedAfterPick) return;
-    undoPickup();
-    setMsg('Pickup undone — draw from the stock.');
+    const vm = getVM();
+    if (!isMyTurn(vm)) return;
+    const res = act('undoPickup');
+    if (!res.async) setMsg(res.ok ? 'Pickup undone — draw from the stock.' : res.error);
     render();
   }
 
   function sortHand(bySuit) {
-    const me = S.players[viewIndex()];
     const suitIdx = (s) => R.SUITS.indexOf(s);
-    me.hand.sort((a, b) => {
+    const cmp = (a, b) => {
       if (a.joker !== b.joker) return a.joker ? 1 : -1;
       if (a.joker) return 0;
       return bySuit
         ? suitIdx(a.suit) - suitIdx(b.suit) || a.rank - b.rank
         : a.rank - b.rank || suitIdx(a.suit) - suitIdx(b.suit);
-    });
+    };
+    if (MODE === 'net') window.NET.view.hand.sort(cmp);
+    else S.players[localYou()].hand.sort(cmp);
     render();
   }
 
@@ -581,32 +477,44 @@
   }
 
   function showPassScreen() {
-    $('pass-name').textContent = cur().name;
+    $('pass-name').textContent = S.players[S.turn].name;
     show('pass-screen');
   }
 
-  function showEndScreen() {
-    const w = S.players[S.winner];
-    const l = S.players[1 - S.winner];
-    const penalty = l.hand.reduce((s, c) => s + R.handPenalty(c), 0);
+  function showEndScreen(overrideTitle, overrideDetail) {
+    const vm = getVM();
+    if (overrideTitle) {
+      $('end-title').textContent = overrideTitle;
+      $('end-detail').textContent = overrideDetail || '';
+      $('end-cards').innerHTML = '';
+      show('end-screen');
+      return;
+    }
+    const w = vm.players[vm.winner];
+    const l = vm.players[1 - vm.winner];
+    const penalty = (vm.loserHand || []).reduce((s, c) => s + R.handPenalty(c), 0);
     $('end-title').textContent = `★ ${w.name} wins! ★`;
     $('end-detail').textContent = `${l.name} is left holding ${penalty} point${penalty === 1 ? '' : 's'}.`;
     const box = $('end-cards');
     box.innerHTML = '';
-    for (const c of l.hand) box.appendChild(cardEl(c, { small: true }));
+    for (const c of vm.loserHand || []) box.appendChild(cardEl(c, { small: true }));
     show('end-screen');
   }
 
-  /* ================= wiring ================= */
+  /* ================= game start ================= */
 
-  function startGame() {
+  function startLocalGame() {
     const mode = $('btn-pvp').classList.contains('active') ? 'pvp' : 'pvc';
+    MODE = 'local';
+    LOCAL = { mode };
     const n1 = $('name1').value.trim() || 'Player 1';
     const n2 = mode === 'pvc' ? 'Computer' : $('name2').value.trim() || 'Player 2';
-    newGame(mode, n1, n2);
+    S = E.newGame([n1, n2]);
+    view.selected.clear();
+    setMsg('');
     show('game-screen');
-    if (cur().isAI) {
-      setMsg(`${cur().name} goes first…`);
+    if (mode === 'pvc' && S.turn === 1) {
+      setMsg('Computer goes first…');
       render();
       aiTurn();
     } else if (mode === 'pvp') {
@@ -617,15 +525,93 @@
     }
   }
 
+  /* ================= online mode ================= */
+
+  function netAvailable() {
+    return !window.NO_NET && location.protocol !== 'file:' && 'WebSocket' in window;
+  }
+
+  function startOnlineCreate() {
+    const name = $('name1').value.trim() || 'Player 1';
+    window.NET.create(name);
+    $('room-code-echo').textContent = '…';
+    show('wait-screen');
+  }
+
+  function startOnlineJoin() {
+    const name = $('name1').value.trim() || 'Player 2';
+    const code = $('room-code').value.trim().toUpperCase();
+    if (!code) {
+      $('online-msg').textContent = 'Enter the room code you were given.';
+      return;
+    }
+    window.NET.join(code, name);
+  }
+
+  function wireNet() {
+    const NET = window.NET;
+    NET.onCreated = (code) => {
+      $('room-code-echo').textContent = code;
+    };
+    NET.onStart = () => {
+      MODE = 'net';
+      view.selected.clear();
+      setMsg('');
+      show('game-screen');
+      render();
+    };
+    NET.onState = (msg) => {
+      if (MODE !== 'net') return;
+      const vm = getVM();
+      if (msg) setMsg(msg);
+      if (vm.over) {
+        showEndScreen();
+      } else {
+        render();
+      }
+    };
+    NET.onError = (error) => {
+      if (MODE === 'net' && !$('game-screen').classList.contains('hidden')) {
+        setMsg(error);
+        render();
+      } else {
+        $('online-msg').textContent = error;
+      }
+    };
+    NET.onOppLeft = (msg) => {
+      showEndScreen('Opponent left', msg || 'Your opponent left the game.');
+    };
+    NET.onClosed = (msg) => {
+      if (MODE === 'net') showEndScreen('Connection lost', msg || 'The connection was lost.');
+    };
+  }
+
+  /* ================= wiring ================= */
+
   function init() {
-    const modeBtns = [$('btn-pvc'), $('btn-pvp')];
+    const modeBtns = [$('btn-pvc'), $('btn-pvp'), $('btn-online')];
     for (const b of modeBtns) {
       b.addEventListener('click', () => {
         modeBtns.forEach((x) => x.classList.toggle('active', x === b));
-        $('name2').classList.toggle('hidden', b.id === 'btn-pvc');
+        const online = b.id === 'btn-online';
+        $('name2').classList.toggle('hidden', b.id !== 'btn-pvp');
+        $('online-row').classList.toggle('hidden', !online);
+        $('btn-start').classList.toggle('hidden', online);
       });
     }
-    $('btn-start').addEventListener('click', startGame);
+    if (!netAvailable()) {
+      $('btn-online').disabled = true;
+      $('btn-online').title = 'Online play needs the hosted version (npm start).';
+    }
+
+    $('btn-start').addEventListener('click', startLocalGame);
+    $('btn-create-room').addEventListener('click', startOnlineCreate);
+    $('btn-join-room').addEventListener('click', startOnlineJoin);
+    $('btn-wait-cancel').addEventListener('click', () => {
+      window.NET.leave();
+      show('menu-screen');
+    });
+
     $('stock').addEventListener('click', onStockClick);
     $('discard').addEventListener('click', onDiscardClick);
     $('btn-meld').addEventListener('click', onMeldButton);
@@ -635,11 +621,18 @@
     $('btn-sort-suit').addEventListener('click', () => sortHand(true));
     $('btn-sort-rank').addEventListener('click', () => sortHand(false));
     $('btn-pass-continue').addEventListener('click', () => {
-      setMsg(`${cur().name}, draw from the stock or the discard pile.`);
+      setMsg(`${S.players[S.turn].name}, draw from the stock or the discard pile.`);
       show('game-screen');
       render();
     });
-    $('btn-again').addEventListener('click', () => show('menu-screen'));
+    $('btn-again').addEventListener('click', () => {
+      if (MODE === 'net') window.NET.leave();
+      MODE = null;
+      S = null;
+      show('menu-screen');
+    });
+
+    wireNet();
   }
 
   document.addEventListener('DOMContentLoaded', init);
@@ -647,6 +640,8 @@
   // Exposed for automated testing.
   window.Scala40 = {
     getState: () => S,
+    getVM,
+    act,
     view,
     render,
   };
