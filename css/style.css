@@ -543,8 +543,17 @@ h2 {
 }
 
 #hand .card {
-  cursor: pointer;
+  cursor: grab;
   transition: transform 0.1s steps(2, end);
+  touch-action: none; /* the finger sorts cards, it doesn't scroll */
+}
+
+#hand .card.dragging {
+  opacity: 0.8;
+  transform: translateY(-10px) scale(1.06);
+  box-shadow: 0 0 0 3px var(--gb-lightest), 6px 8px 0 rgba(0, 0, 0, 0.5);
+  cursor: grabbing;
+  z-index: 5;
 }
 
 #hand .card.selected {

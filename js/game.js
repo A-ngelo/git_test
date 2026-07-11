@@ -23,6 +23,113 @@
 
   const $ = (id) => document.getElementById(id);
 
+  /* ---- hand ordering (pure presentation, per seat) ----
+   * The engine/server owns which cards you hold; the order you see them
+   * in is yours: kept here, survives redraws and server updates. */
+  const handOrder = {}; // seat index -> [card ids]
+
+  function orderedHand(vm) {
+    const order = handOrder[vm.you] || [];
+    const byId = new Map(vm.hand.map((c) => [c.id, c]));
+    const out = [];
+    for (const id of order) {
+      const c = byId.get(id);
+      if (c) {
+        out.push(c);
+        byId.delete(id);
+      }
+    }
+    for (const c of byId.values()) out.push(c); // new draws go on the right
+    handOrder[vm.you] = out.map((c) => c.id);
+    return out;
+  }
+
+  /* ---- drag to rearrange ---- */
+  const drag = {
+    el: null,
+    moved: false,
+    startX: 0,
+    startY: 0,
+    pendingRender: false,
+    suppressClick: false,
+  };
+
+  // Where should the dragged card land for this pointer position?
+  // Row-aware, so it works when the hand wraps onto multiple lines.
+  function dropTarget(container, x, y, draggedEl) {
+    for (const kid of container.children) {
+      if (kid === draggedEl) continue;
+      const r = kid.getBoundingClientRect();
+      if (y < r.top) return kid;
+      if (y <= r.bottom && x < r.left + r.width / 2) return kid;
+    }
+    return null; // end of the hand
+  }
+
+  // NB: reordering a node with insertBefore drops pointer capture in
+  // Chromium, so the drag is tracked on the document, not the card.
+  function onDragMove(e) {
+    if (!drag.el || e.pointerId !== drag.pointerId) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < 8) return;
+      drag.moved = true;
+      drag.el.classList.add('dragging');
+    }
+    const container = $('hand');
+    const before = dropTarget(container, e.clientX, e.clientY, drag.el);
+    if (before !== drag.el && before !== drag.el.nextSibling) {
+      container.insertBefore(drag.el, before);
+    }
+  }
+
+  function onDragUp(e) {
+    if (drag.el && e.pointerId === drag.pointerId) endDrag(true);
+  }
+
+  function onDragCancel(e) {
+    if (drag.el && e.pointerId === drag.pointerId) endDrag(false);
+  }
+
+  function endDrag(commit) {
+    const el = drag.el;
+    if (!el) return;
+    document.removeEventListener('pointermove', onDragMove);
+    document.removeEventListener('pointerup', onDragUp);
+    document.removeEventListener('pointercancel', onDragCancel);
+    drag.el = null;
+    el.classList.remove('dragging');
+    if (drag.moved) {
+      drag.suppressClick = true;
+      setTimeout(() => {
+        drag.suppressClick = false;
+      }, 250);
+      if (commit) {
+        const vm = getVM();
+        if (vm) {
+          handOrder[vm.you] = [...$('hand').children].map((k) => Number(k.dataset.id));
+        }
+      }
+    }
+    const needRender = drag.pendingRender || drag.moved;
+    drag.moved = false;
+    drag.pendingRender = false;
+    if (needRender) render();
+  }
+
+  function attachDragHandlers(el) {
+    el.addEventListener('pointerdown', (e) => {
+      if (!e.isPrimary || drag.el) return;
+      drag.el = el;
+      drag.moved = false;
+      drag.startX = e.clientX;
+      drag.startY = e.clientY;
+      drag.pointerId = e.pointerId;
+      document.addEventListener('pointermove', onDragMove);
+      document.addEventListener('pointerup', onDragUp);
+      document.addEventListener('pointercancel', onDragCancel);
+    });
+  }
+
   /* ================= view model ================= */
 
   function localYou() {
@@ -181,6 +288,11 @@
   function render() {
     const vm = getVM();
     if (!vm) return;
+    // don't yank the hand out from under an in-progress drag
+    if (drag.el && drag.moved) {
+      drag.pendingRender = true;
+      return;
+    }
     const me = vm.players[vm.you];
     const opp = vm.players[1 - vm.you];
 
@@ -254,11 +366,12 @@
 
     const handBox = $('hand');
     handBox.innerHTML = '';
-    for (const c of vm.hand) {
+    for (const c of orderedHand(vm)) {
       const el = cardEl(c);
       if (view.selected.has(c.id)) el.classList.add('selected');
       if (c.id === vm.newCardId) el.classList.add('fresh');
       el.addEventListener('click', () => onHandCardClick(c.id));
+      attachDragHandlers(el);
       handBox.appendChild(el);
     }
 
@@ -294,6 +407,10 @@
   /* ================= human interactions ================= */
 
   function onHandCardClick(cardId) {
+    if (drag.suppressClick) {
+      drag.suppressClick = false;
+      return;
+    }
     const vm = getVM();
     if (!isMyTurn(vm)) return;
     if (vm.phase !== 'play') {
@@ -459,6 +576,8 @@
   }
 
   function sortHand(bySuit) {
+    const vm = getVM();
+    if (!vm) return;
     const suitIdx = (s) => R.SUITS.indexOf(s);
     const cmp = (a, b) => {
       if (a.joker !== b.joker) return a.joker ? 1 : -1;
@@ -467,8 +586,7 @@
         ? suitIdx(a.suit) - suitIdx(b.suit) || a.rank - b.rank
         : a.rank - b.rank || suitIdx(a.suit) - suitIdx(b.suit);
     };
-    if (MODE === 'net') window.NET.view.hand.sort(cmp);
-    else S.players[localYou()].hand.sort(cmp);
+    handOrder[vm.you] = [...vm.hand].sort(cmp).map((c) => c.id);
     render();
   }
 
