@@ -16,11 +16,11 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
-const R = require('../js/rules.js');
-const Engine = require('../js/engine.js');
+const R = require('../www/js/rules.js');
+const Engine = require('../www/js/engine.js');
 
 const PORT = Number(process.env.PORT) || 3040;
-const ROOT = path.join(__dirname, '..');
+const ROOT = path.join(__dirname, '..', 'www');
 const MAX_ROOMS = 500;
 const ROOM_TTL_EMPTY_MS = 3 * 60 * 1000;   // both players gone
 const ROOM_TTL_DONE_MS = 5 * 60 * 1000;    // game finished

@@ -2,8 +2,8 @@
 'use strict';
 
 const assert = require('assert');
-const R = require('../js/rules.js');
-const AI = require('../js/ai.js');
+const R = require('../www/js/rules.js');
+const AI = require('../www/js/ai.js');
 
 let n = 0;
 function t(name, fn) {

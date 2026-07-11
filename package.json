@@ -1,11 +1,14 @@
 {
   "name": "scala40",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Scala 40 (Scala Quaranta) card game — Game Boy style, with online multiplayer",
   "private": true,
   "scripts": {
     "start": "node server/server.js",
-    "test": "node test/rules.test.js && node test/engine.test.js"
+    "test": "node test/rules.test.js && node test/engine.test.js",
+    "ios": "npx cap add ios && npx cap sync ios && npx cap open ios",
+    "android": "npx cap add android && npx cap sync android && npx cap open android",
+    "assets": "npx @capacitor/assets generate --iconBackgroundColor '#0f380f' --splashBackgroundColor '#0f380f'"
   },
   "dependencies": {
     "ws": "^8.18.0"

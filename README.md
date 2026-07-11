@@ -1,41 +1,30 @@
 # Scala 40 (Scala Quaranta)
 
-A playable, mobile-friendly implementation of **Scala 40** — the classic
-Italian 40-point rummy — with a retro **Game Boy-style monochrome LCD**
-look. Three modes: vs computer, pass-and-play, and **online multiplayer
-with room codes**.
+A complete, mobile-first implementation of **Scala 40** — the classic
+Italian 40-point rummy — styled like a Game Boy LCD. Three modes:
+**vs computer**, **pass-and-play**, and **online multiplayer** with
+5-letter room codes. Match play to 101/151/201 penalty points.
 
-The game itself is plain dependency-free HTML/CSS/JS, ready to be wrapped
-into a native iOS/Android app with Capacitor (see below). Online play adds
-one server dependency (`ws`).
+The game is dependency-free HTML/CSS/JS packaged three ways from one
+codebase:
 
-## Play it
+| Way to ship            | What it takes                                    |
+| ---------------------- | ------------------------------------------------ |
+| **Web / PWA**          | `npm start` (or any static host for local modes) |
+| **Server + online**    | `Dockerfile` + `fly.toml` included               |
+| **iOS / Android**      | Capacitor config + icons/splash included         |
 
-**Local modes** (vs CPU, pass-and-play): just open `index.html` in any
-browser.
-
-**With online multiplayer:**
+## Run it
 
 ```sh
 npm install
-npm start          # serves the game + referee on http://localhost:3040
+npm start          # game + multiplayer referee on http://localhost:3040
 ```
 
-One player taps **Online → Create room** and shares the 5-letter code;
-the other taps **Online**, enters the code, and joins. To play across the
-internet, deploy the server anywhere Node runs (Fly.io, Railway, a $5 VPS)
-— it's a single process serving both the static app and the WebSocket
-referee, so no extra configuration is needed.
-
-## How multiplayer stays fair
-
-The server is **authoritative**: it holds the real deck and both hands,
-validates every move through the same `js/engine.js` the browser uses for
-local play, and sends each client only a redacted view (your cards, the
-table, and the opponent's card *count*). A modified client can neither
-cheat nor peek — there is a unit test asserting no hidden card ever
-appears in a client view. Dropped connections rejoin automatically with a
-session token.
+Open two browser windows to try online mode: **Online → Create room**,
+share the 5-letter code, join from the other window. Visiting from a
+phone lets you **Add to Home Screen** — the app installs as a PWA with
+the proper icon and works offline for the local modes.
 
 ## Game rules implemented
 
@@ -52,56 +41,85 @@ session token.
   swap a table joker for the real card it stands for.
 - Discard your last card to win the hand. The loser counts penalty points
   for the cards left in hand (joker 25, ace 11, faces 10, rest face value).
-- **Match play:** penalty points accumulate hand after hand; the player
-  who reaches the match limit loses. Pick **101, 151 (default), or 201**
-  in the menu (in online rooms the creator's choice applies). The lead
-  alternates between hands and the running score is always visible next
-  to each player's name.
+- **Match play:** penalties accumulate hand after hand; reaching the match
+  limit — **101 / 151 (default) / 201**, picked in the menu — loses the
+  match. In online rooms the creator's choice applies. The lead alternates
+  between hands and running scores sit next to each player's name.
+- Drag cards to arrange your hand (order is yours alone and persists), or
+  use the sort buttons.
 
 Casual simplification: a retrieved joker may be kept in hand (strict rules
 require replaying it the same turn).
 
+## How multiplayer stays fair
+
+The server is **authoritative**: it holds the real deck and both hands,
+validates every move through the same `www/js/engine.js` the browser uses
+for local play, and sends each client only a redacted view (your cards,
+the table, and the opponent's card *count*). A modified client can neither
+cheat nor peek — a unit test asserts no hidden card ever appears in a
+client view. Dropped connections rejoin automatically with a session token.
+
 ## Project layout
 
-| Path                  | What it is                                              |
-| --------------------- | ------------------------------------------------------- |
-| `index.html`          | App shell and screens (menu, lobby, game, end)          |
-| `css/style.css`       | Game Boy DMG theme (4-shade palette, scanlines)         |
-| `js/rules.js`         | Meld validation, attachments, joker swaps, scoring      |
-| `js/engine.js`        | Game state machine: turns, opening, discards, winning   |
-| `js/ai.js`            | Computer opponent: meld search, opening solver, plans   |
-| `js/net.js`           | WebSocket client: rooms, actions, auto-reconnect        |
-| `js/game.js`          | Screens, rendering, input; routes moves to engine/net   |
-| `server/server.js`    | Static host + authoritative multiplayer referee         |
-| `test/`               | Unit tests for rules, AI, and engine (`npm test`)       |
+| Path                     | What it is                                            |
+| ------------------------ | ----------------------------------------------------- |
+| `www/`                   | The whole app (this is what Capacitor bundles)        |
+| `www/index.html`         | Shell, screens, PWA manifest + service worker hookup  |
+| `www/css/style.css`      | Game Boy DMG theme (4-shade palette, scanlines)       |
+| `www/js/rules.js`        | Meld validation, attachments, joker swaps, scoring    |
+| `www/js/engine.js`       | State machine: turns, opening, match play, winning    |
+| `www/js/ai.js`           | Computer opponent (table-aware discards, 40+ solver)  |
+| `www/js/net.js`          | WebSocket client: rooms, actions, auto-reconnect      |
+| `www/js/game.js`         | Screens, rendering, input, drag-to-sort               |
+| `www/icons/`, `www/sw.js`, `www/manifest.webmanifest` | PWA installability + offline shell |
+| `server/server.js`       | Static host + authoritative multiplayer referee       |
+| `test/`                  | Unit tests for rules, AI, and engine (`npm test`)     |
+| `resources/`             | 1024px icon + 2732px splash for `@capacitor/assets`   |
+| `Dockerfile`, `fly.toml` | One-command server deployment                         |
+| `capacitor.config.json`  | Native iOS/Android wrapper config                     |
 
 `rules.js`, `engine.js`, and `ai.js` are DOM-free and run in both the
 browser and Node — local play, the server referee, and the tests all share
 the identical game logic.
 
-## Shipping to the App Store (Capacitor)
+## Deploying the online server
 
-The app is deliberately dependency-free and touch-first so it can be
-wrapped as-is:
+Any Node host works; it's a single process, no database. With Fly.io:
 
 ```sh
-npm install @capacitor/core @capacitor/cli
-npx cap init "Scala 40" com.yourname.scala40 --web-dir .
-npx cap add ios        # requires Xcode on macOS
-npx cap open ios       # build/sign/submit from Xcode
+flyctl launch --copy-config --name your-scala40   # uses the Dockerfile
+flyctl deploy
 ```
 
-Before submitting: add app icons and a splash screen, set
-`UIRequiresFullScreen`/orientation in Xcode, and consider haptics + sound.
-Note that "Scala 40" is the traditional (public domain) game name, but
-check App Store availability for your exact app title.
+Railway/Render: point them at the repo; they detect the Dockerfile. The
+server binds `PORT` (default 3040) and serves both the game and the
+WebSocket referee — one URL to share.
 
-Note for online play from a Capacitor app: point `js/net.js` at your
-deployed server URL instead of `location.host`.
+## Shipping to the App Store (Capacitor)
+
+On a Mac with Xcode:
+
+```sh
+npm install @capacitor/core @capacitor/cli @capacitor/assets --save-dev
+npm run assets      # generates all icon/splash sizes from resources/
+npm run ios         # adds the iOS project and opens Xcode
+```
+
+Then in Xcode: set your signing team, build, and submit. `npm run android`
+does the same for Google Play via Android Studio.
+
+Checklist before submitting:
+- [ ] Change `appId` in `capacitor.config.json` to your own reverse-DNS id
+- [ ] For online play from the native app, point `www/js/net.js` at your
+      deployed server URL instead of `location.host`
+- [ ] Verify the app name "Scala 40" (or your variant) is available on the
+      store — the game itself is traditional and public domain
+- [ ] App Privacy: no data collected (nothing is tracked or stored)
 
 ## Roadmap ideas
 
-- Difficulty levels for the AI
+- Difficulty levels for the AI (defensive discards tracking opponent pickups)
 - Random matchmaking and rematches for online rooms
 - Sound effects, haptics, animations
 - Selectable palettes (original DMG green, gray "Pocket", inverted)

@@ -2,8 +2,8 @@
 'use strict';
 
 const assert = require('assert');
-const R = require('../js/rules.js');
-const E = require('../js/engine.js');
+const R = require('../www/js/rules.js');
+const E = require('../www/js/engine.js');
 
 let n = 0;
 function t(name, fn) {

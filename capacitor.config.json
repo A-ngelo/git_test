@@ -1,0 +1,12 @@
+{
+  "appId": "com.angelo.scala40",
+  "appName": "Scala 40",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0f380f"
+  },
+  "android": {
+    "backgroundColor": "#0f380f"
+  }
+}
