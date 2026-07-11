@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Scala Quaranta — Scala 40</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230f380f'/%3E%3Crect x='3' y='2' width='10' height='12' rx='1' fill='%239bbc0f'/%3E%3Ctext x='8' y='11' font-size='8' font-family='monospace' font-weight='bold' text-anchor='middle' fill='%230f380f'%3E40%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ===== menu ===== -->
+  <div class="screen" id="menu-screen">
+    <div class="panel">
+      <h1>Scala 40 <em>Quaranta</em></h1>
+      <p class="tagline">Italian 40-point rummy · 2 decks · 4 jokers</p>
+
+      <div class="mode-row">
+        <button id="btn-pvc" class="mode-btn active" type="button">▶ vs CPU</button>
+        <button id="btn-pvp" class="mode-btn" type="button">▶ 2P</button>
+        <button id="btn-online" class="mode-btn" type="button">▶ Online</button>
+      </div>
+
+      <div class="name-row">
+        <input id="name1" maxlength="14" placeholder="Player 1 name" autocomplete="off">
+        <input id="name2" maxlength="14" placeholder="Player 2 name" autocomplete="off" class="hidden">
+      </div>
+
+      <button id="btn-start" class="primary-btn" type="button">Deal cards</button>
+
+      <div id="online-row" class="hidden">
+        <button id="btn-create-room" class="primary-btn" type="button">Create room</button>
+        <p class="online-or">— or join a friend —</p>
+        <div class="join-row">
+          <input id="room-code" maxlength="5" placeholder="CODE" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false">
+          <button id="btn-join-room" type="button">Join</button>
+        </div>
+        <p id="online-msg" class="online-msg"></p>
+      </div>
+
+      <details class="rules">
+        <summary>How to play</summary>
+        <ul>
+          <li>Each player gets <b>13 cards</b>. On your turn: <b>draw</b> one card, then optionally play melds, and <b>discard</b> one card.</li>
+          <li>Melds are <b>sets</b> (3–4 cards of the same rank, all different suits) or <b>runs</b> (3+ consecutive cards of one suit). Max one joker per meld.</li>
+          <li>Your first melds must total <b>40+ points</b> in a single turn (“opening”). A=11 (or 1 in A‑2‑3), face cards 10, others face value.</li>
+          <li>After opening you can attach single cards to any meld on the table and swap table jokers for the real card.</li>
+          <li>You may take the top discard only if you use it in a meld that turn.</li>
+          <li>Discard your last card to win. The loser counts penalty points (joker 25, ace 11, faces 10).</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+  <!-- ===== waiting for opponent (online) ===== -->
+  <div class="screen hidden" id="wait-screen">
+    <div class="panel">
+      <h2>Room ready</h2>
+      <p class="pass-to">Share this code with your opponent:</p>
+      <div id="room-code-echo" class="room-code">…</div>
+      <p class="online-msg">The game starts the moment they join.</p>
+      <button id="btn-wait-cancel" class="primary-btn" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ===== pass device (pvp) ===== -->
+  <div class="screen hidden" id="pass-screen">
+    <div class="panel">
+      <h2>Pass the device</h2>
+      <p class="pass-to">It’s <b id="pass-name"></b>’s turn</p>
+      <button id="btn-pass-continue" class="primary-btn" type="button">I’m ready</button>
+    </div>
+  </div>
+
+  <!-- ===== game ===== -->
+  <div class="screen hidden" id="game-screen">
+    <header id="opp-bar">
+      <div class="player-chip">
+        <span class="p-name" id="opp-name"></span>
+        <span class="p-count" id="opp-count"></span>
+        <span class="p-open" id="opp-opened"></span>
+      </div>
+      <div id="opp-hand"></div>
+    </header>
+
+    <main id="table">
+      <div id="melds"></div>
+      <div id="piles">
+        <div class="pile" id="stock" title="Stock — click to draw">
+          <div class="card back"></div>
+          <span class="pile-label"><span id="stock-count"></span> left</span>
+        </div>
+        <div class="pile" id="discard" title="Discard pile"></div>
+      </div>
+    </main>
+
+    <div id="msgbar"></div>
+
+    <footer id="me-bar">
+      <div class="player-chip">
+        <span class="p-name" id="me-name"></span>
+        <span class="p-open" id="me-opened"></span>
+        <span class="p-open-pts" id="me-open-pts"></span>
+      </div>
+      <div id="hand"></div>
+      <div id="actions">
+        <button id="btn-meld" type="button">Play meld</button>
+        <button id="btn-discard" type="button">Discard</button>
+        <button id="btn-takeback" class="hidden warn" type="button">Take back</button>
+        <button id="btn-undopick" class="hidden warn" type="button">Undo pickup</button>
+        <button id="btn-sort-suit" class="ghost" type="button">Sort ♠♥</button>
+        <button id="btn-sort-rank" class="ghost" type="button">Sort 1‑9</button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ===== end ===== -->
+  <div class="screen hidden" id="end-screen">
+    <div class="panel">
+      <h2 id="end-title"></h2>
+      <p id="end-detail"></p>
+      <div id="end-cards"></div>
+      <button id="btn-again" class="primary-btn" type="button">Play again</button>
+    </div>
+  </div>
+
+  <script src="js/rules.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

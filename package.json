@@ -1,0 +1,13 @@
+{
+  "name": "scala40",
+  "version": "0.2.0",
+  "description": "Scala 40 (Scala Quaranta) card game — Game Boy style, with online multiplayer",
+  "private": true,
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node test/rules.test.js && node test/engine.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
