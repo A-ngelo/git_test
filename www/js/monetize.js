@@ -39,11 +39,11 @@
       prod: {
         banner: {
           ios: 'ca-app-pub-1286473724303531/1246417453', // "Menu banner"
-          android: 'TODO_ANDROID_BANNER_ID',
+          android: 'ca-app-pub-1286473724303531/9643782220', // "Menu banner"
         },
         interstitial: {
           ios: 'ca-app-pub-1286473724303531/1016719686', // "Between hands"
-          android: 'TODO_ANDROID_INTERSTITIAL_ID',
+          android: 'ca-app-pub-1286473724303531/7017618887', // "Between hands"
         },
       },
     },
