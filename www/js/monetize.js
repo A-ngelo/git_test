@@ -22,13 +22,29 @@
 
   const CONFIG = {
     admob: {
-      banner: {
-        ios: 'ca-app-pub-3940256099942544/2934735716',
-        android: 'ca-app-pub-3940256099942544/6300978111',
+      // Safety latch: Google's public TEST ads serve until this is set to
+      // false — flip it as the very last step before store submission.
+      // (Tapping your own live ads can get an AdMob account suspended.)
+      useTestAds: true,
+      test: {
+        banner: {
+          ios: 'ca-app-pub-3940256099942544/2934735716',
+          android: 'ca-app-pub-3940256099942544/6300978111',
+        },
+        interstitial: {
+          ios: 'ca-app-pub-3940256099942544/4411468910',
+          android: 'ca-app-pub-3940256099942544/1033173712',
+        },
       },
-      interstitial: {
-        ios: 'ca-app-pub-3940256099942544/4411468910',
-        android: 'ca-app-pub-3940256099942544/1033173712',
+      prod: {
+        banner: {
+          ios: 'ca-app-pub-1286473724303531/1246417453', // "Menu banner"
+          android: 'TODO_ANDROID_BANNER_ID',
+        },
+        interstitial: {
+          ios: 'ca-app-pub-1286473724303531/1016719686', // "Between hands"
+          android: 'TODO_ANDROID_INTERSTITIAL_ID',
+        },
       },
     },
     revenuecat: {
@@ -37,6 +53,14 @@
     },
     interstitialEveryHands: 3,
   };
+
+  function adUnits() {
+    const a = CONFIG.admob;
+    const ids = a.useTestAds ? a.test : a.prod;
+    // never ship a TODO placeholder to the ad SDK
+    const filled = JSON.stringify(ids).indexOf('TODO_') === -1;
+    return filled ? ids : a.test;
+  }
 
   const cap = global.Capacitor;
   const native = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
@@ -106,7 +130,7 @@
     if (!adsReady || adFree || bannerVisible) return;
     try {
       await AdMob.showBanner({
-        adId: CONFIG.admob.banner[platform],
+        adId: adUnits().banner[platform],
         adSize: 'ADAPTIVE_BANNER',
         position: 'BOTTOM_CENTER',
         margin: 0,
@@ -129,7 +153,7 @@
     if (++handsSinceAd < CONFIG.interstitialEveryHands) return;
     handsSinceAd = 0;
     try {
-      await AdMob.prepareInterstitial({ adId: CONFIG.admob.interstitial[platform] });
+      await AdMob.prepareInterstitial({ adId: adUnits().interstitial[platform] });
       await AdMob.showInterstitial();
     } catch {}
   }
