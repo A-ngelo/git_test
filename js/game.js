@@ -68,6 +68,7 @@
       case 'replaceJoker': return A.replaceJoker(S, p, args.cardId, args.meldId);
       case 'takeBack': return A.takeBack(S, p);
       case 'discard': return A.discard(S, p, args.cardId);
+      case 'nextHand': return A.nextHand(S);
       default: return { ok: false, error: 'Unknown action.' };
     }
   }
@@ -189,6 +190,8 @@
 
     // opponent bar
     $('opp-name').textContent = opp.name;
+    $('opp-score').textContent = `${vm.scores[1 - vm.you]}/${vm.target}`;
+    $('me-score').textContent = `${vm.scores[vm.you]}/${vm.target}`;
     $('opp-count').textContent = `${opp.handCount} cards`;
     $('opp-opened').textContent = opp.opened ? 'opened' : 'not opened';
     $('opp-opened').classList.toggle('on', opp.opened);
@@ -486,18 +489,36 @@
     if (overrideTitle) {
       $('end-title').textContent = overrideTitle;
       $('end-detail').textContent = overrideDetail || '';
+      $('end-scores').textContent = '';
       $('end-cards').innerHTML = '';
+      $('btn-next').classList.add('hidden');
+      $('btn-again').textContent = 'Back to menu';
       show('end-screen');
       return;
     }
     const w = vm.players[vm.winner];
     const l = vm.players[1 - vm.winner];
-    const penalty = (vm.loserHand || []).reduce((s, c) => s + R.handPenalty(c), 0);
-    $('end-title').textContent = `★ ${w.name} wins! ★`;
-    $('end-detail').textContent = `${l.name} is left holding ${penalty} point${penalty === 1 ? '' : 's'}.`;
+    const penalty =
+      vm.lastPenalty != null
+        ? vm.lastPenalty
+        : (vm.loserHand || []).reduce((s, c) => s + R.handPenalty(c), 0);
+    if (vm.matchOver) {
+      $('end-title').textContent = `★ ${vm.players[vm.matchWinner].name} wins the match! ★`;
+      $('end-detail').textContent =
+        `${l.name} takes ${penalty} point${penalty === 1 ? '' : 's'} and busts past ${vm.target}.`;
+    } else {
+      $('end-title').textContent = `★ ${w.name} wins hand ${vm.handNumber}! ★`;
+      $('end-detail').textContent =
+        `${l.name} takes ${penalty} penalty point${penalty === 1 ? '' : 's'}.`;
+    }
+    $('end-scores').textContent =
+      `${vm.players[0].name} ${vm.scores[0]} · ${vm.players[1].name} ${vm.scores[1]}` +
+      ` — reach ${vm.target} and you lose the match`;
     const box = $('end-cards');
     box.innerHTML = '';
     for (const c of vm.loserHand || []) box.appendChild(cardEl(c, { small: true }));
+    $('btn-next').classList.toggle('hidden', vm.matchOver);
+    $('btn-again').textContent = vm.matchOver ? 'Back to menu' : 'Quit match';
     show('end-screen');
   }
 
@@ -567,6 +588,8 @@
       if (vm.over) {
         showEndScreen();
       } else {
+        // a new hand may have been dealt while the end screen was up
+        if ($('game-screen').classList.contains('hidden')) show('game-screen');
         render();
       }
     };
@@ -624,6 +647,29 @@
       setMsg(`${S.players[S.turn].name}, draw from the stock or the discard pile.`);
       show('game-screen');
       render();
+    });
+    $('btn-next').addEventListener('click', () => {
+      if (MODE === 'net') {
+        window.NET.action('nextHand', {});
+        return;
+      }
+      const res = act('nextHand');
+      if (!res.ok) return;
+      view.selected.clear();
+      setMsg('');
+      if (LOCAL.mode === 'pvp') {
+        showPassScreen();
+      } else {
+        show('game-screen');
+        if (S.turn === 1) {
+          setMsg(`Hand ${S.handNumber} — Computer starts…`);
+          render();
+          aiTurn();
+        } else {
+          setMsg(`Hand ${S.handNumber} — you start. Draw a card.`);
+          render();
+        }
+      }
     });
     $('btn-again').addEventListener('click', () => {
       if (MODE === 'net') window.NET.leave();

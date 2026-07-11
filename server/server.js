@@ -127,9 +127,13 @@ function describe(room, p, a, res) {
       return (
         (res.openedNow ? `${name} opened! ` : '') +
         (res.won
-          ? `${name} discarded ${R.cardLabel(res.card)} and WINS!`
+          ? `${name} discarded ${R.cardLabel(res.card)} and wins the hand!`
           : `${name} discarded ${R.cardLabel(res.card)}.`)
       );
+    case 'nextHand': {
+      const first = room.players[room.state.turn].name;
+      return `Hand ${res.handNumber} dealt — ${first} leads.`;
+    }
     default:
       return '';
   }
@@ -144,6 +148,7 @@ const ACTION_ARGS = {
   replaceJoker: (args) => [Number(args.cardId), Number(args.meldId)],
   takeBack: () => [],
   discard: (args) => [Number(args.cardId)],
+  nextHand: () => [],
 };
 
 /* ================= websocket handling ================= */
@@ -276,7 +281,8 @@ function handleMessage(ws, m) {
         return sendTo(room.players[ws.playerIndex], { t: 'error', error: res.error });
       }
       broadcastState(room, describe(room, ws.playerIndex, m.a, res));
-      if (room.state.over) room.doneAt = Date.now();
+      // rooms linger between hands; only a finished match starts the clock
+      room.doneAt = room.state.matchOver ? Date.now() : null;
       break;
     }
 

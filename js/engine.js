@@ -27,22 +27,64 @@
     for (let i = 0; i < 13; i++) {
       for (const p of players) p.hand.push(deck.pop());
     }
+    const firstTurn = opts.firstTurn != null ? opts.firstTurn : Math.floor(Math.random() * 2);
     return {
       players,
       stock: deck,
       discard: [deck.pop()],
       melds: [],
       meldSeq: 1,
-      turn: opts.firstTurn != null ? opts.firstTurn : Math.floor(Math.random() * 2),
+      turn: firstTurn,
       phase: 'draw',        // 'draw' -> 'play'
       picked: null,         // id of card taken from the discard pile this turn
       mustStock: false,     // set after undoing a pickup
       actedAfterPick: false,
       provisional: [],      // meld ids laid this turn by a not-yet-opened player
       lastDraw: null,       // { p, id } — which card the current player just drew
-      over: false,
-      winner: null,
+      over: false,          // this hand is finished
+      winner: null,         // winner of this hand
+      // match play: penalty points accumulate hand after hand, and the
+      // player who reaches `target` loses the match
+      scores: names.map(() => 0),
+      target: opts.target != null ? opts.target : 151,
+      handNumber: 1,
+      handFirstTurn: firstTurn,
+      lastPenalty: null,
+      matchOver: false,
+      matchWinner: null,
     };
+  }
+
+  /* Deal the next hand of the match: fresh deck, scores carried over,
+   * the lead alternating between hands. Either player may trigger it. */
+  function nextHand(S) {
+    if (!S.over) return err('The hand is not over yet.');
+    if (S.matchOver) return err('The match is over.');
+    const deck = R.shuffle(R.makeDeck());
+    for (const pl of S.players) {
+      pl.hand = [];
+      pl.opened = false;
+    }
+    for (let i = 0; i < 13; i++) {
+      for (const pl of S.players) pl.hand.push(deck.pop());
+    }
+    S.stock = deck;
+    S.discard = [deck.pop()];
+    S.melds = [];
+    S.meldSeq = 1;
+    S.handNumber++;
+    S.handFirstTurn = 1 - S.handFirstTurn;
+    S.turn = S.handFirstTurn;
+    S.phase = 'draw';
+    S.picked = null;
+    S.mustStock = false;
+    S.actedAfterPick = false;
+    S.provisional = [];
+    S.lastDraw = null;
+    S.over = false;
+    S.winner = null;
+    S.lastPenalty = null;
+    return ok({ handNumber: S.handNumber });
   }
 
   function provisionalPoints(S) {
@@ -214,7 +256,15 @@
     if (player.hand.length === 0) {
       S.over = true;
       S.winner = p;
-      return ok({ card, openedNow, won: true });
+      const loser = 1 - p;
+      const penalty = S.players[loser].hand.reduce((s, c) => s + R.handPenalty(c), 0);
+      S.scores[loser] += penalty;
+      S.lastPenalty = penalty;
+      if (S.scores[loser] >= S.target) {
+        S.matchOver = true;
+        S.matchWinner = p;
+      }
+      return ok({ card, openedNow, won: true, penalty });
     }
 
     // next turn
@@ -253,6 +303,12 @@
       over: S.over,
       winner: S.winner,
       loserHand: S.over && S.winner != null ? S.players[1 - S.winner].hand : null,
+      scores: S.scores.slice(),
+      target: S.target,
+      handNumber: S.handNumber,
+      lastPenalty: S.lastPenalty,
+      matchOver: S.matchOver,
+      matchWinner: S.matchWinner,
     };
   }
 
@@ -269,6 +325,7 @@
       replaceJoker,
       takeBack,
       discard,
+      nextHand,
     },
   };
 

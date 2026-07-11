@@ -50,12 +50,14 @@ session token.
   (enforced; you can also undo the pickup).
 - After opening you can attach single cards to any meld on the table and
   swap a table joker for the real card it stands for.
-- Discard your last card to win. Loser counts penalty points
-  (joker 25, ace 11, faces 10, rest face value).
+- Discard your last card to win the hand. The loser counts penalty points
+  for the cards left in hand (joker 25, ace 11, faces 10, rest face value).
+- **Match play:** penalty points accumulate hand after hand; the player
+  who reaches **151** loses the match. The lead alternates between hands
+  and the running score is always visible next to each player's name.
 
-Casual simplifications: a retrieved joker may be kept in hand (strict rules
-require replaying it the same turn), and a game is a single hand rather
-than a multi-round points match.
+Casual simplification: a retrieved joker may be kept in hand (strict rules
+require replaying it the same turn).
 
 ## Project layout
 
@@ -97,7 +99,7 @@ deployed server URL instead of `location.host`.
 
 ## Roadmap ideas
 
-- Multi-round scoring to 101/201 points
+- Configurable match target (101/201) from the menu
 - Difficulty levels for the AI
 - Random matchmaking and rematches for online rooms
 - Sound effects, haptics, animations

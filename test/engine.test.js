@@ -171,25 +171,70 @@ t('after opening: attach to any meld and swap table jokers', () => {
   assert.strictEqual(run.slots.length, 4);
 });
 
-/* ---- winning ---- */
-t('discarding the last card wins the game', () => {
-  const { S } = riggedGame();
+/* ---- winning + match play ---- */
+function winFirstHand(S) {
   E.actions.drawStock(S, 0);
   const h = S.players[0].hand;
   E.actions.layMeld(S, 0, h.filter((x) => x.rank === 13).map((x) => x.id));
   E.actions.layMeld(S, 0, h.filter((x) => x.suit === '♣' && x.rank >= 5 && x.rank <= 7).map((x) => x.id));
   E.actions.discard(S, 0, S.players[0].hand[0].id);
-  // force p0's hand to one card to close quickly
   S.players[1].hand.push(...S.players[0].hand.splice(1));
   E.actions.drawStock(S, 1);
   E.actions.discard(S, 1, S.players[1].hand[0].id);
   E.actions.drawStock(S, 0);
   const keep = S.players[0].hand[0];
-  S.players[1].hand.push(...S.players[0].hand.splice(1)); // hand back to 1 card
-  const res = E.actions.discard(S, 0, keep.id);
+  S.players[1].hand.push(...S.players[0].hand.splice(1));
+  return E.actions.discard(S, 0, keep.id);
+}
+
+t('discarding the last card wins the hand and books the penalty', () => {
+  const { S } = riggedGame();
+  const res = winFirstHand(S);
   assert(res.ok && res.won);
   assert.strictEqual(S.over, true);
   assert.strictEqual(S.winner, 0);
+  assert(res.penalty > 0);
+  assert.strictEqual(S.scores[1], res.penalty);
+  assert.strictEqual(S.scores[0], 0);
+  assert.strictEqual(S.matchOver, false); // one hand can't reach 151 here
+});
+
+t('nextHand deals fresh, keeps scores, alternates the lead', () => {
+  const { S } = riggedGame();
+  const won = winFirstHand(S);
+  const bank = S.scores[1];
+  assert.strictEqual(E.actions.nextHand(S).ok, true);
+  assert.strictEqual(S.handNumber, 2);
+  assert.strictEqual(S.over, false);
+  assert.strictEqual(S.turn, 1); // hand 1 lead was 0
+  assert.strictEqual(S.scores[1], bank);
+  assert.strictEqual(S.players[0].hand.length, 13);
+  assert.strictEqual(S.players[1].hand.length, 13);
+  assert.strictEqual(S.melds.length, 0);
+  assert.strictEqual(S.players[0].opened, false);
+  assert(won.ok);
+});
+
+t('nextHand is rejected mid-hand and after the match ends', () => {
+  const { S } = riggedGame();
+  assert.strictEqual(E.actions.nextHand(S).ok, false); // hand still running
+  S.scores[1] = 150; // one loss from busting
+  const res = winFirstHand(S);
+  assert(res.ok && res.won);
+  assert.strictEqual(S.matchOver, true);
+  assert.strictEqual(S.matchWinner, 0);
+  assert(S.scores[1] >= 151);
+  assert.strictEqual(E.actions.nextHand(S).ok, false);
+});
+
+t('views carry the match scoreboard', () => {
+  const { S } = riggedGame();
+  winFirstHand(S);
+  const v = E.view(S, 1);
+  assert.deepStrictEqual(v.scores, S.scores);
+  assert.strictEqual(v.target, 151);
+  assert.strictEqual(v.handNumber, 1);
+  assert.strictEqual(v.lastPenalty, S.scores[1]);
 });
 
 /* ---- view redaction ---- */

@@ -322,6 +322,33 @@ h2 {
   opacity: 0.75;
 }
 
+.p-score {
+  padding: 1px 7px;
+  border: 2px solid var(--gb-light);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.end-scores {
+  font-size: 0.82rem;
+  margin-bottom: 14px;
+  padding: 8px;
+  border: 2px dashed var(--gb-light);
+}
+
+.ghost-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border: 3px solid var(--gb-light);
+  background: transparent;
+  color: var(--gb-lightest);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
 .p-open {
   font-size: 0.62rem;
   text-transform: uppercase;

@@ -48,7 +48,8 @@
           <li>Your first melds must total <b>40+ points</b> in a single turn (“opening”). A=11 (or 1 in A‑2‑3), face cards 10, others face value.</li>
           <li>After opening you can attach single cards to any meld on the table and swap table jokers for the real card.</li>
           <li>You may take the top discard only if you use it in a meld that turn.</li>
-          <li>Discard your last card to win. The loser counts penalty points (joker 25, ace 11, faces 10).</li>
+          <li>Discard your last card to win the hand. The loser counts penalty points (joker 25, ace 11, faces 10, rest face value).</li>
+          <li>Penalty points add up hand after hand — reach <b>151</b> and you lose the match.</li>
         </ul>
       </details>
     </div>
@@ -79,6 +80,7 @@
     <header id="opp-bar">
       <div class="player-chip">
         <span class="p-name" id="opp-name"></span>
+        <span class="p-score" id="opp-score" title="penalty points / match limit"></span>
         <span class="p-count" id="opp-count"></span>
         <span class="p-open" id="opp-opened"></span>
       </div>
@@ -101,6 +103,7 @@
     <footer id="me-bar">
       <div class="player-chip">
         <span class="p-name" id="me-name"></span>
+        <span class="p-score" id="me-score" title="penalty points / match limit"></span>
         <span class="p-open" id="me-opened"></span>
         <span class="p-open-pts" id="me-open-pts"></span>
       </div>
@@ -121,8 +124,10 @@
     <div class="panel">
       <h2 id="end-title"></h2>
       <p id="end-detail"></p>
+      <p id="end-scores" class="end-scores"></p>
       <div id="end-cards"></div>
-      <button id="btn-again" class="primary-btn" type="button">Play again</button>
+      <button id="btn-next" class="primary-btn" type="button">Next hand</button>
+      <button id="btn-again" class="ghost-btn" type="button">Quit match</button>
     </div>
   </div>
 
