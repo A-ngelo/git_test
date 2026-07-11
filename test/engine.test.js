@@ -227,6 +227,19 @@ t('nextHand is rejected mid-hand and after the match ends', () => {
   assert.strictEqual(E.actions.nextHand(S).ok, false);
 });
 
+t('the match target is configurable and defaults to 151', () => {
+  const short = E.newGame(['A', 'B'], { target: 101 });
+  assert.strictEqual(short.target, 101);
+  assert.strictEqual(E.view(short, 0).target, 101);
+  const def = E.newGame(['A', 'B']);
+  assert.strictEqual(def.target, 151);
+  const { S } = riggedGame();
+  S.target = 101;
+  S.scores[1] = 100;
+  const res = winFirstHand(S);
+  assert(res.ok && S.matchOver && S.matchWinner === 0);
+});
+
 t('views carry the match scoreboard', () => {
   const { S } = riggedGame();
   winFirstHand(S);

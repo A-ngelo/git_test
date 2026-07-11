@@ -22,6 +22,13 @@
         <button id="btn-online" class="mode-btn" type="button">▶ Online</button>
       </div>
 
+      <div class="target-row">
+        <span class="target-label">Match to</span>
+        <button class="target-btn" data-target="101" type="button">101</button>
+        <button class="target-btn active" data-target="151" type="button">151</button>
+        <button class="target-btn" data-target="201" type="button">201</button>
+      </div>
+
       <div class="name-row">
         <input id="name1" maxlength="14" placeholder="Player 1 name" autocomplete="off">
         <input id="name2" maxlength="14" placeholder="Player 2 name" autocomplete="off" class="hidden">
@@ -49,7 +56,7 @@
           <li>After opening you can attach single cards to any meld on the table and swap table jokers for the real card.</li>
           <li>You may take the top discard only if you use it in a meld that turn.</li>
           <li>Discard your last card to win the hand. The loser counts penalty points (joker 25, ace 11, faces 10, rest face value).</li>
-          <li>Penalty points add up hand after hand — reach <b>151</b> and you lose the match.</li>
+          <li>Penalty points add up hand after hand — reach the match limit (101/151/201, your pick) and you lose the match.</li>
         </ul>
       </details>
     </div>
@@ -61,7 +68,7 @@
       <h2>Room ready</h2>
       <p class="pass-to">Share this code with your opponent:</p>
       <div id="room-code-echo" class="room-code">…</div>
-      <p class="online-msg">The game starts the moment they join.</p>
+      <p class="online-msg"><span id="wait-target"></span> The game starts the moment they join.</p>
       <button id="btn-wait-cancel" class="primary-btn" type="button">Cancel</button>
     </div>
   </div>

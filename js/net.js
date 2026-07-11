@@ -109,9 +109,9 @@
     };
   }
 
-  NET.create = (name) => {
+  NET.create = (name, target) => {
     NET.reset();
-    send({ t: 'create', name });
+    send({ t: 'create', name, target });
   };
 
   NET.join = (code, name) => {

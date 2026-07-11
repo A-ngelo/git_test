@@ -74,12 +74,15 @@ function makeCode() {
   }
 }
 
-function newRoom(ws, name) {
+const TARGETS = [101, 151, 201];
+
+function newRoom(ws, name, target) {
   const room = {
     code: makeCode(),
     players: [
       { ws, name, token: crypto.randomBytes(12).toString('hex'), connected: true },
     ],
+    target: TARGETS.includes(Number(target)) ? Number(target) : 151,
     state: null,
     createdAt: Date.now(),
     emptySince: null,
@@ -206,7 +209,7 @@ function handleMessage(ws, m) {
       if (rooms.size >= MAX_ROOMS) {
         return sendTo({ ws }, { t: 'error', error: 'Server is full right now — try again soon.' });
       }
-      const room = newRoom(ws, cleanName(m.name));
+      const room = newRoom(ws, cleanName(m.name), m.target);
       ws.room = room;
       ws.playerIndex = 0;
       sendTo(room.players[0], { t: 'created', code: room.code, token: room.players[0].token });
@@ -228,7 +231,7 @@ function handleMessage(ws, m) {
       });
       ws.room = room;
       ws.playerIndex = 1;
-      room.state = Engine.newGame(room.players.map((p) => p.name));
+      room.state = Engine.newGame(room.players.map((p) => p.name), { target: room.target });
       const first = room.players[room.state.turn].name;
       room.players.forEach((p, i) => {
         sendTo(p, {

@@ -53,8 +53,10 @@ session token.
 - Discard your last card to win the hand. The loser counts penalty points
   for the cards left in hand (joker 25, ace 11, faces 10, rest face value).
 - **Match play:** penalty points accumulate hand after hand; the player
-  who reaches **151** loses the match. The lead alternates between hands
-  and the running score is always visible next to each player's name.
+  who reaches the match limit loses. Pick **101, 151 (default), or 201**
+  in the menu (in online rooms the creator's choice applies). The lead
+  alternates between hands and the running score is always visible next
+  to each player's name.
 
 Casual simplification: a retrieved joker may be kept in hand (strict rules
 require replaying it the same turn).
@@ -99,7 +101,6 @@ deployed server URL instead of `location.host`.
 
 ## Roadmap ideas
 
-- Configurable match target (101/201) from the menu
 - Difficulty levels for the AI
 - Random matchmaking and rematches for online rooms
 - Sound effects, haptics, animations

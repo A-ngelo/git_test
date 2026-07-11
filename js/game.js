@@ -524,13 +524,18 @@
 
   /* ================= game start ================= */
 
+  function chosenTarget() {
+    const btn = document.querySelector('.target-btn.active');
+    return btn ? Number(btn.dataset.target) : 151;
+  }
+
   function startLocalGame() {
     const mode = $('btn-pvp').classList.contains('active') ? 'pvp' : 'pvc';
     MODE = 'local';
     LOCAL = { mode };
     const n1 = $('name1').value.trim() || 'Player 1';
     const n2 = mode === 'pvc' ? 'Computer' : $('name2').value.trim() || 'Player 2';
-    S = E.newGame([n1, n2]);
+    S = E.newGame([n1, n2], { target: chosenTarget() });
     view.selected.clear();
     setMsg('');
     show('game-screen');
@@ -554,8 +559,10 @@
 
   function startOnlineCreate() {
     const name = $('name1').value.trim() || 'Player 1';
-    window.NET.create(name);
+    const target = chosenTarget();
+    window.NET.create(name, target);
     $('room-code-echo').textContent = '…';
+    $('wait-target').textContent = `Match to ${target}.`;
     show('wait-screen');
   }
 
@@ -620,6 +627,12 @@
         $('name2').classList.toggle('hidden', b.id !== 'btn-pvp');
         $('online-row').classList.toggle('hidden', !online);
         $('btn-start').classList.toggle('hidden', online);
+      });
+    }
+    const targetBtns = [...document.querySelectorAll('.target-btn')];
+    for (const b of targetBtns) {
+      b.addEventListener('click', () => {
+        targetBtns.forEach((x) => x.classList.toggle('active', x === b));
       });
     }
     if (!netAvailable()) {
