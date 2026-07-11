@@ -115,7 +115,39 @@ Checklist before submitting:
       deployed server URL instead of `location.host`
 - [ ] Verify the app name "Scala 40" (or your variant) is available on the
       store — the game itself is traditional and public domain
-- [ ] App Privacy: no data collected (nothing is tracked or stored)
+- [ ] Complete the monetization setup below, or strip
+      `www/js/monetize.js` for an ad-free release
+
+## Ads + "Remove ads" purchase
+
+The native apps show AdMob banners on the menu and hand-end screens and a
+full-screen ad every 3rd hand — **never during play**. A one-time
+purchase removes all ads (with the App Store-required restore button).
+The web/PWA build has no ads at all, and `monetize.js` no-ops there.
+
+Wiring it up for release:
+
+1. **Install the plugins** in the app project (only needed for native
+   builds): `npm i @capacitor-community/admob @revenuecat/purchases-capacitor`
+2. **AdMob** (admob.google.com): register the iOS and Android apps,
+   create one banner and one interstitial ad unit each, and put the four
+   ids into `CONFIG.admob` in `www/js/monetize.js`. Google's public
+   **test ids are pre-filled** — keep them while developing; clicking
+   real ads in a dev build can get an account suspended. Publish an
+   `app-ads.txt` on your site as AdMob instructs.
+3. **The purchase** (revenuecat.com, free tier): create a non-consumable
+   "Remove Ads" product in App Store Connect and Google Play Console
+   (e.g. $2.99), attach both to a RevenueCat entitlement named `no_ads`,
+   and put the two public API keys into `CONFIG.revenuecat`. RevenueCat
+   handles receipts, cross-device restore, and both stores' quirks.
+4. **Store disclosures**: with ads, "no data collected" no longer
+   applies — declare AdMob's data collection in App Privacy / Data
+   safety (both consoles have AdMob-specific guidance), add a privacy
+   policy URL, and on iOS the bundled UMP consent flow covers
+   GDPR/ATT prompts.
+
+Everything above is config — the purchase flow, entitlement check,
+banner placement, and interstitial cadence are already implemented.
 
 ## Roadmap ideas
 

@@ -595,6 +595,11 @@
   function show(screenId) {
     for (const s of document.querySelectorAll('.screen')) s.classList.add('hidden');
     $(screenId).classList.remove('hidden');
+    // ads live on the menu and between hands — never over the table
+    if (window.Monetize) {
+      if (screenId === 'menu-screen' || screenId === 'end-screen') window.Monetize.showBanner();
+      else window.Monetize.hideBanner();
+    }
   }
 
   function showPassScreen() {
@@ -638,6 +643,7 @@
     $('btn-next').classList.toggle('hidden', vm.matchOver);
     $('btn-again').textContent = vm.matchOver ? 'Back to menu' : 'Quit match';
     show('end-screen');
+    if (window.Monetize) window.Monetize.onHandEnd();
   }
 
   /* ================= game start ================= */
@@ -810,6 +816,26 @@
     });
 
     wireNet();
+
+    // monetization (native app builds only; a no-op on the web)
+    if (window.Monetize) {
+      const row = $('monetize-row');
+      const note = $('monetize-msg');
+      const refresh = () => row.classList.toggle('hidden', !window.Monetize.showsAds());
+      window.Monetize.init().then(refresh);
+      $('btn-remove-ads').addEventListener('click', async () => {
+        note.textContent = '';
+        const res = await window.Monetize.buyRemoveAds();
+        note.textContent = res.ok ? 'Ads removed — thank you!' : res.error;
+        refresh();
+      });
+      $('btn-restore-ads').addEventListener('click', async () => {
+        note.textContent = '';
+        const res = await window.Monetize.restorePurchases();
+        note.textContent = res.ok ? 'Purchase restored — ads removed.' : res.error;
+        refresh();
+      });
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);
