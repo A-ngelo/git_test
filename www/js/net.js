@@ -77,7 +77,7 @@
           break;
         case 'state':
           NET.view = m.view;
-          if (NET.onState) NET.onState(m.msg || '');
+          if (NET.onState) NET.onState(m.msg || '', m.evt || null);
           break;
         case 'error':
           if (NET.onError) NET.onError(m.error || 'Something went wrong.');

@@ -69,6 +69,7 @@
           <li>Discard your last card to win the hand. The loser counts penalty points (joker 25, ace 11, faces 10, rest face value).</li>
           <li>Penalty points add up hand after hand — reach the match limit (101/151/201, your pick) and you lose the match.</li>
           <li>Drag cards to arrange your hand however you like, or use the sort buttons.</li>
+          <li>A finished meld with no joker — all four suits, or a full A-to-K run — is automatically cleared off the table to keep the board tidy.</li>
         </ul>
       </details>
     </div>
@@ -114,6 +115,10 @@
           <span class="pile-label"><span id="stock-count"></span> left</span>
         </div>
         <div class="pile" id="discard" title="Discard pile"></div>
+        <div class="pile hidden" id="cleared" title="Completed melds — out of play">
+          <div class="card back cleared-stack"></div>
+          <span class="pile-label"><span id="cleared-count"></span> cleared</span>
+        </div>
       </div>
     </main>
 
@@ -134,6 +139,7 @@
         <button id="btn-undopick" class="hidden warn" type="button">Undo pickup</button>
         <button id="btn-sort-suit" class="ghost" type="button">Sort ♠♥</button>
         <button id="btn-sort-rank" class="ghost" type="button">Sort 1‑9</button>
+        <button id="btn-sound" class="ghost" type="button">♪ on</button>
       </div>
     </footer>
   </div>
@@ -150,6 +156,7 @@
     </div>
   </div>
 
+  <script src="js/sound.js"></script>
   <script src="js/rules.js"></script>
   <script src="js/engine.js"></script>
   <script src="js/ai.js"></script>

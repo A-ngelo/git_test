@@ -43,6 +43,7 @@
       lastDraw: null,       // { p, id } — which card the current player just drew
       over: false,          // this hand is finished
       winner: null,         // winner of this hand
+      cleared: [],          // completed melds swept off the board
       // match play: penalty points accumulate hand after hand, and the
       // player who reaches `target` loses the match
       scores: names.map(() => 0),
@@ -83,6 +84,7 @@
     S.lastDraw = null;
     S.over = false;
     S.winner = null;
+    S.cleared = [];
     S.lastPenalty = null;
     return ok({ handNumber: S.handNumber });
   }
@@ -98,6 +100,28 @@
       return phase === 'draw' ? 'You already drew this turn.' : 'Draw a card first.';
     }
     return null;
+  }
+
+  /* House rule: a finished meld that can never change again — a set with
+   * all four suits, or a full A-to-K run, with no joker to reclaim — is
+   * swept off the board into the cleared pile (out of play, not into the
+   * drawable discard). Melds still holding a joker stay on the table so
+   * the real card can swap it out. */
+  function sweepCompleted(S) {
+    const swept = [];
+    S.melds = S.melds.filter((m) => {
+      if (m.provisional) return true;
+      const full =
+        (m.type === 'set' && m.slots.length === 4) ||
+        (m.type === 'run' && m.slots.length === 13);
+      if (full && !m.slots.some((sl) => sl.card.joker)) {
+        swept.push(m);
+        return false;
+      }
+      return true;
+    });
+    if (swept.length) S.cleared.push(...swept);
+    return swept;
   }
 
   function removeFromHand(player, ids) {
@@ -178,7 +202,7 @@
     removeFromHand(player, cardIds);
     if (meld.provisional) S.provisional.push(meld.id);
     if (S.picked != null) S.actedAfterPick = true;
-    return ok({ meld });
+    return ok({ meld, cleared: sweepCompleted(S) });
   }
 
   function attach(S, p, cardId, meldId) {
@@ -193,7 +217,7 @@
     if (!R.applyAttach(meld, card)) return err(`${R.cardLabel(card)} does not fit on that meld.`);
     removeFromHand(player, [card.id]);
     if (S.picked != null) S.actedAfterPick = true;
-    return ok({ card, meld });
+    return ok({ card, meld, cleared: sweepCompleted(S) });
   }
 
   function replaceJoker(S, p, cardId, meldId) {
@@ -209,7 +233,7 @@
     removeFromHand(player, [card.id]);
     player.hand.push(joker);
     if (S.picked != null) S.actedAfterPick = true;
-    return ok({ card, meld });
+    return ok({ card, meld, cleared: sweepCompleted(S) });
   }
 
   function takeBack(S, p) {
@@ -243,11 +267,13 @@
     }
 
     let openedNow = false;
+    let cleared = [];
     if (pts >= 40) {
       player.opened = true;
       openedNow = true;
       for (const m of S.melds) if (m.provisional) m.provisional = false;
       S.provisional = [];
+      cleared = sweepCompleted(S);
     }
 
     removeFromHand(player, [card.id]);
@@ -264,7 +290,7 @@
         S.matchOver = true;
         S.matchWinner = p;
       }
-      return ok({ card, openedNow, won: true, penalty });
+      return ok({ card, openedNow, cleared, won: true, penalty });
     }
 
     // next turn
@@ -275,7 +301,7 @@
     S.actedAfterPick = false;
     S.provisional = [];
     S.lastDraw = null;
-    return ok({ card, openedNow, won: false });
+    return ok({ card, openedNow, cleared, won: false });
   }
 
   /* ---------- redacted per-player view (what a client may know) ---------- */
@@ -300,6 +326,7 @@
       newCardId: S.lastDraw && S.lastDraw.p === p ? S.lastDraw.id : null,
       provisionalPoints: provisionalPoints(S),
       provisionalCount: S.provisional.length,
+      clearedCount: S.cleared.reduce((n, m) => n + m.slots.length, 0),
       over: S.over,
       winner: S.winner,
       loserHand: S.over && S.winner != null ? S.players[1 - S.winner].hand : null,

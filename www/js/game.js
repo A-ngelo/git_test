@@ -153,6 +153,28 @@
     view.msg = text;
   }
 
+  const snd = (name) => window.Sound && window.Sound.play(name);
+
+  // One sound vocabulary for every source of moves: local play, the AI,
+  // and server events for online games.
+  function soundForAction(action, res) {
+    const map = {
+      drawStock: 'draw',
+      pickDiscard: 'draw',
+      layMeld: 'meld',
+      attach: 'attach',
+      replaceJoker: 'joker',
+      discard: 'discard',
+      takeBack: 'discard',
+      undoPickup: 'discard',
+      nextHand: 'deal',
+    };
+    if (map[action]) snd(map[action]);
+    const clearedCount = res && res.cleared && (res.cleared.length || res.cleared);
+    if (clearedCount) snd('clear');
+    if (res && res.openedNow) snd('open');
+  }
+
   /* ================= acting ================= */
 
   // Route an action to the engine (local) or the server (net). Local
@@ -178,6 +200,17 @@
       case 'nextHand': return A.nextHand(S);
       default: return { ok: false, error: 'Unknown action.' };
     }
+  }
+
+  function actWithSound(name, args) {
+    const res = act(name, args);
+    if (res.ok && !res.async) {
+      soundForAction(name, res);
+      if (res.cleared && res.cleared.length) {
+        setMsg('A completed meld was cleared off the table.');
+      }
+    }
+    return res;
   }
 
   // Local-mode flow after a successful discard: end, AI turn, or pass.
@@ -212,6 +245,7 @@
         E.actions.drawStock(S, 1);
         setMsg('Computer draws from the stock.');
       }
+      snd('draw');
       render();
       setTimeout(() => {
         if (!S || S.over) return;
@@ -229,6 +263,7 @@
     if (a.type === 'meld') {
       const res = E.actions.layMeld(S, 1, a.cardIds);
       if (res.ok) {
+        soundForAction('layMeld', res);
         const label = res.meld.slots.map((s) => R.cardLabel(s.card)).join(' ');
         setMsg(`Computer plays ${label}.`);
       }
@@ -236,16 +271,19 @@
       const card = p.hand.find((c) => c.id === a.cardId);
       const target = card && S.melds.find((m) => R.canAttach(m, card));
       if (target) {
-        E.actions.attach(S, 1, card.id, target.id);
+        const res = E.actions.attach(S, 1, card.id, target.id);
+        if (res.ok) soundForAction('attach', res);
         setMsg(`Computer attaches ${R.cardLabel(card)}.`);
       }
     } else if (a.type === 'discard') {
       const res = E.actions.discard(S, 1, a.cardId);
       if (res.ok) {
+        soundForAction('discard', res);
         if (S.over) {
           showEndScreen();
           return;
         }
+        snd('turn');
         setMsg(
           (res.openedNow ? 'Computer opened! ' : '') +
             `Computer discards ${R.cardLabel(res.card)}. Your turn.`
@@ -345,6 +383,8 @@
 
     // piles
     $('stock-count').textContent = vm.stockCount;
+    $('cleared').classList.toggle('hidden', vm.clearedCount === 0);
+    $('cleared-count').textContent = vm.clearedCount;
     const discardBox = $('discard');
     discardBox.innerHTML = '';
     if (vm.discardTop) discardBox.appendChild(cardEl(vm.discardTop));
@@ -432,7 +472,7 @@
       render();
       return;
     }
-    const res = act('drawStock');
+    const res = actWithSound('drawStock');
     if (!res.async) setMsg(res.ok ? '' : res.error);
     render();
   }
@@ -441,7 +481,7 @@
     const vm = getVM();
     if (!isMyTurn(vm)) return;
     if (vm.phase === 'draw') {
-      const res = act('pickDiscard');
+      const res = actWithSound('pickDiscard');
       if (!res.async) {
         setMsg(
           res.ok
@@ -467,7 +507,7 @@
     if (ids.length === 1 && me.opened && meld) {
       const card = vm.hand.find((c) => c.id === ids[0]);
       if (card && R.canReplaceJoker(meld, card)) {
-        const res = act('replaceJoker', { cardId: ids[0], meldId });
+        const res = actWithSound('replaceJoker', { cardId: ids[0], meldId });
         if (!res.async) {
           setMsg(res.ok ? 'You swapped the joker into your hand!' : res.error);
           if (res.ok) view.selected.clear();
@@ -510,7 +550,7 @@
     }
     let lastError = null;
     for (const id of sequence) {
-      const res = act('attach', { cardId: id, meldId });
+      const res = actWithSound('attach', { cardId: id, meldId });
       if (!res.async && !res.ok) lastError = res.error;
       else view.selected.delete(id);
     }
@@ -523,12 +563,13 @@
   function onMeldButton() {
     const vm = getVM();
     if (!isMyTurn(vm) || vm.phase !== 'play') return;
-    const res = act('layMeld', { cardIds: [...view.selected] });
+    const res = actWithSound('layMeld', { cardIds: [...view.selected] });
     if (res.async) {
       view.selected.clear();
       return;
     }
     if (!res.ok) {
+      snd('error');
       setMsg(res.error);
     } else {
       view.selected.clear();
@@ -548,9 +589,10 @@
     const vm = getVM();
     if (!isMyTurn(vm) || vm.phase !== 'play' || view.selected.size !== 1) return;
     const id = [...view.selected][0];
-    const res = act('discard', { cardId: id });
+    const res = actWithSound('discard', { cardId: id });
     if (res.async) return;
     if (!res.ok) {
+      snd('error');
       setMsg(res.error);
       render();
       return;
@@ -562,7 +604,7 @@
   function onTakeBack() {
     const vm = getVM();
     if (!isMyTurn(vm) || vm.phase !== 'play') return;
-    const res = act('takeBack');
+    const res = actWithSound('takeBack');
     if (!res.async) setMsg(res.ok ? 'Opening melds returned to your hand.' : res.error);
     render();
   }
@@ -570,7 +612,7 @@
   function onUndoPick() {
     const vm = getVM();
     if (!isMyTurn(vm)) return;
-    const res = act('undoPickup');
+    const res = actWithSound('undoPickup');
     if (!res.async) setMsg(res.ok ? 'Pickup undone — draw from the stock.' : res.error);
     render();
   }
@@ -642,6 +684,7 @@
     for (const c of vm.loserHand || []) box.appendChild(cardEl(c, { small: true }));
     $('btn-next').classList.toggle('hidden', vm.matchOver);
     $('btn-again').textContent = vm.matchOver ? 'Back to menu' : 'Quit match';
+    snd(vm.winner === vm.you ? 'win' : 'lose');
     show('end-screen');
     if (window.Monetize) window.Monetize.onHandEnd();
   }
@@ -662,6 +705,7 @@
     S = E.newGame([n1, n2], { target: chosenTarget() });
     view.selected.clear();
     setMsg('');
+    snd('deal');
     show('game-screen');
     if (mode === 'pvc' && S.turn === 1) {
       setMsg('Computer goes first…');
@@ -709,16 +753,19 @@
       MODE = 'net';
       view.selected.clear();
       setMsg('');
+      snd('deal');
       show('game-screen');
       render();
     };
-    NET.onState = (msg) => {
+    NET.onState = (msg, evt) => {
       if (MODE !== 'net') return;
       const vm = getVM();
       if (msg) setMsg(msg);
+      if (evt && evt.a) soundForAction(evt.a, evt);
       if (vm.over) {
         showEndScreen();
       } else {
+        if (evt && evt.a === 'discard' && vm.turn === vm.you) snd('turn');
         // a new hand may have been dealt while the end screen was up
         if ($('game-screen').classList.contains('hidden')) show('game-screen');
         render();
@@ -778,6 +825,16 @@
     $('btn-discard').addEventListener('click', onDiscardButton);
     $('btn-takeback').addEventListener('click', onTakeBack);
     $('btn-undopick').addEventListener('click', onUndoPick);
+    const soundBtn = $('btn-sound');
+    const syncSound = () => {
+      soundBtn.textContent = window.Sound && window.Sound.muted() ? '♪ off' : '♪ on';
+    };
+    soundBtn.addEventListener('click', () => {
+      if (window.Sound) window.Sound.toggle();
+      syncSound();
+    });
+    syncSound();
+
     $('btn-sort-suit').addEventListener('click', () => sortHand(true));
     $('btn-sort-rank').addEventListener('click', () => sortHand(false));
     $('btn-pass-continue').addEventListener('click', () => {
@@ -792,6 +849,7 @@
       }
       const res = act('nextHand');
       if (!res.ok) return;
+      snd('deal');
       view.selected.clear();
       setMsg('');
       if (LOCAL.mode === 'pvp') {

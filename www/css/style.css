@@ -737,3 +737,14 @@ h2 {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* cleared pile: swept completed melds, out of play */
+
+.cleared-stack {
+  opacity: 0.55;
+  transform: rotate(-6deg);
+}
+
+#cleared .pile-label {
+  opacity: 0.6;
+}

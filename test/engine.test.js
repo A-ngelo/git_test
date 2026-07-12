@@ -171,6 +171,64 @@ t('after opening: attach to any meld and swap table jokers', () => {
   assert.strictEqual(run.slots.length, 4);
 });
 
+/* ---- completed-meld sweep ---- */
+t('a jokerless 4-card set is swept off the board when completed', () => {
+  const p0 = openingHand();
+  p0[6] = c(13, '\u2663'); // 4th king to attach later
+  const { S } = riggedGame({ p0 });
+  E.actions.drawStock(S, 0);
+  const h = S.players[0].hand;
+  E.actions.layMeld(S, 0, h.filter((x) => x.rank === 13 && x.suit !== '\u2663').map((x) => x.id));
+  E.actions.layMeld(S, 0, h.filter((x) => x.suit === '\u2663' && x.rank >= 5 && x.rank <= 7).map((x) => x.id));
+  E.actions.discard(S, 0, S.players[0].hand.find((x) => x.rank === 2).id);
+  E.actions.drawStock(S, 1);
+  E.actions.discard(S, 1, S.players[1].hand[0].id);
+  E.actions.drawStock(S, 0);
+  const setMeld = S.melds.find((m) => m.type === 'set');
+  const fourth = S.players[0].hand.find((x) => x.rank === 13);
+  const res = E.actions.attach(S, 0, fourth.id, setMeld.id);
+  assert(res.ok);
+  assert.strictEqual(res.cleared.length, 1);
+  assert(!S.melds.some((m) => m.id === setMeld.id), 'set should leave the board');
+  assert.strictEqual(S.cleared.length, 1);
+  assert.strictEqual(E.view(S, 0).clearedCount, 4);
+});
+
+t('a full set holding a joker stays until the joker is swapped out', () => {
+  const p0 = openingHand();
+  // open with K-K-K-Joker (40) directly
+  p0[3] = { id: 9001, rank: 0, suit: null, joker: true };
+  const { S } = riggedGame({ p0 });
+  E.actions.drawStock(S, 0);
+  const h = S.players[0].hand;
+  const ids = h.filter((x) => x.rank === 13 || x.joker).map((x) => x.id);
+  assert.strictEqual(ids.length, 4);
+  assert(E.actions.layMeld(S, 0, ids).ok);
+  const res = E.actions.discard(S, 0, S.players[0].hand[0].id);
+  assert(res.ok && res.openedNow);
+  assert.strictEqual(res.cleared.length, 0, 'jokered set must stay on the table');
+  assert.strictEqual(S.melds.length, 1);
+  // opponent swaps the real K in -> set completes -> swept, joker to hand
+  const kClubs = c(13, '\u2663');
+  S.players[1].hand.push(kClubs);
+  S.players[1].opened = true; // test shortcut: allow the swap
+  E.actions.drawStock(S, 1);
+  const swap = E.actions.replaceJoker(S, 1, kClubs.id, S.melds[0].id);
+  assert(swap.ok);
+  assert.strictEqual(swap.cleared.length, 1);
+  assert.strictEqual(S.melds.length, 0);
+  assert(S.players[1].hand.some((x) => x.joker), 'joker should be in hand');
+});
+
+t('nextHand resets the cleared pile', () => {
+  const { S } = riggedGame();
+  S.cleared.push({ slots: [] });
+  const res = winFirstHand(S);
+  assert(res.ok);
+  E.actions.nextHand(S);
+  assert.strictEqual(S.cleared.length, 0);
+});
+
 /* ---- winning + match play ---- */
 function winFirstHand(S) {
   E.actions.drawStock(S, 0);

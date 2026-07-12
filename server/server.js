@@ -98,9 +98,9 @@ function sendTo(player, obj) {
   }
 }
 
-function broadcastState(room, msg) {
+function broadcastState(room, msg, evt) {
   room.players.forEach((p, i) => {
-    sendTo(p, { t: 'state', view: Engine.view(room.state, i), msg: msg || '' });
+    sendTo(p, { t: 'state', view: Engine.view(room.state, i), msg: msg || '', evt: evt || null });
   });
 }
 
@@ -110,6 +110,14 @@ function cleanName(name) {
 
 /* What everyone is told about a move — public information only. */
 function describe(room, p, a, res) {
+  const cleared =
+    res && res.cleared && res.cleared.length
+      ? ' A completed meld was cleared off the table.'
+      : '';
+  return describeBase(room, p, a, res) + cleared;
+}
+
+function describeBase(room, p, a, res) {
   const name = room.players[p].name;
   switch (a) {
     case 'drawStock':
@@ -283,7 +291,12 @@ function handleMessage(ws, m) {
       if (!res.ok) {
         return sendTo(room.players[ws.playerIndex], { t: 'error', error: res.error });
       }
-      broadcastState(room, describe(room, ws.playerIndex, m.a, res));
+      broadcastState(room, describe(room, ws.playerIndex, m.a, res), {
+        a: m.a,
+        openedNow: !!res.openedNow,
+        won: !!res.won,
+        cleared: res.cleared ? res.cleared.length : 0,
+      });
       // rooms linger between hands; only a finished match starts the clock
       room.doneAt = room.state.matchOver ? Date.now() : null;
       break;
