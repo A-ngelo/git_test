@@ -2,7 +2,10 @@
 
 A complete, mobile-first implementation of **Scala 40** — the classic
 Italian 40-point rummy — styled like a Game Boy LCD, with synthesized
-sound effects. Modes: **vs computer**, **pass-and-play**, and **online
+sound effects and a full **English/Italian** interface (auto-selects
+Italian on Italian devices; toggle in the menu). Online tables are
+mixed-language: the server broadcasts structured events and every client
+composes move messages in its own tongue. Modes: **vs computer**, **pass-and-play**, and **online
 multiplayer** with 5-letter room codes — **1v1, 3, or 4 players**.
 Match play to 101/151/201 penalty points, and online matches feed a
 **ranked ladder** (per-mode Elo, detailed stat board, leaderboards).

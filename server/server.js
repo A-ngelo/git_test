@@ -16,7 +16,6 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
-const R = require('../www/js/rules.js');
 const Engine = require('../www/js/engine.js');
 const Stats = require('./stats.js');
 
@@ -130,57 +129,20 @@ function sendTo(player, obj) {
   }
 }
 
-function broadcastState(room, msg, evt) {
+// clients compose human-readable messages from the event in their own
+// language; the server only states the facts (public information only)
+function broadcastState(room, evt) {
   room.players.forEach((p, i) => {
-    sendTo(p, { t: 'state', view: Engine.view(room.state, i), msg: msg || '', evt: evt || null });
+    sendTo(p, { t: 'state', view: Engine.view(room.state, i), evt: evt || null });
   });
+}
+
+function pubCard(c) {
+  return c ? { rank: c.rank, suit: c.suit, joker: !!c.joker } : null;
 }
 
 function cleanName(name) {
   return String(name || '').slice(0, 14).trim() || 'Player';
-}
-
-/* What everyone is told about a move — public information only. */
-function describe(room, p, a, res) {
-  const cleared =
-    res && res.cleared && res.cleared.length
-      ? ' A completed meld was cleared off the table.'
-      : '';
-  const dead = res && res.stalemate ? ' The stock is gone — dead hand, everyone counts.' : '';
-  return describeBase(room, p, a, res) + cleared + dead;
-}
-
-function describeBase(room, p, a, res) {
-  const name = room.players[p].name;
-  switch (a) {
-    case 'drawStock':
-      return `${name} drew from the stock.`;
-    case 'pickDiscard':
-      return `${name} took ${R.cardLabel(res.card)} from the discard pile.`;
-    case 'undoPickup':
-      return `${name} put ${R.cardLabel(res.card)} back and will draw from the stock.`;
-    case 'layMeld':
-      return `${name} played ${res.meld.slots.map((s) => R.cardLabel(s.card)).join(' ')}.`;
-    case 'attach':
-      return `${name} attached ${R.cardLabel(res.card)}.`;
-    case 'replaceJoker':
-      return `${name} swapped the joker for ${R.cardLabel(res.card)}.`;
-    case 'takeBack':
-      return `${name} took back their opening melds.`;
-    case 'discard':
-      return (
-        (res.openedNow ? `${name} opened! ` : '') +
-        (res.won
-          ? `${name} discarded ${R.cardLabel(res.card)} and wins the hand!`
-          : `${name} discarded ${R.cardLabel(res.card)}.`)
-      );
-    case 'nextHand': {
-      const first = room.players[room.state.turn].name;
-      return `Hand ${res.handNumber} dealt — ${first} leads.`;
-    }
-    default:
-      return '';
-  }
 }
 
 const ACTION_ARGS = {
@@ -234,10 +196,7 @@ wss.on('connection', (ws) => {
       room.emptySince = Date.now();
     } else {
       for (const otherP of othersOf(room, ws.playerIndex)) {
-        sendTo(otherP, {
-          t: 'opp_offline',
-          msg: `${player.name} lost connection — waiting for them to return…`,
-        });
+        sendTo(otherP, { t: 'opp_offline', name: player.name });
       }
     }
   });
@@ -247,7 +206,7 @@ function handleMessage(ws, m) {
   switch (m.t) {
     case 'create': {
       if (rooms.size >= MAX_ROOMS) {
-        return sendTo({ ws }, { t: 'error', error: 'Server is full right now — try again soon.' });
+        return sendTo({ ws }, { t: 'error', code: 'serverFull', error: 'Server is full right now — try again soon.' });
       }
       const room = newRoom(ws, cleanName(m.name), m.target, m.seats, cleanPid(m.pid), m.rules);
       ws.room = room;
@@ -259,9 +218,9 @@ function handleMessage(ws, m) {
     case 'join': {
       const code = String(m.code || '').toUpperCase().trim();
       const room = rooms.get(code);
-      if (!room) return sendTo({ ws }, { t: 'error', error: `No room with code ${code || '—'}.` });
+      if (!room) return sendTo({ ws }, { t: 'error', code: 'noRoom', params: { code: code || '—' }, error: `No room with code ${code || '—'}.` });
       if (room.state || room.players.length >= room.size) {
-        return sendTo({ ws }, { t: 'error', error: 'That room is already full.' });
+        return sendTo({ ws }, { t: 'error', code: 'roomFull', error: 'That room is already full.' });
       }
       room.players.push({
         ws,
@@ -291,18 +250,12 @@ function handleMessage(ws, m) {
         target: room.target,
         rules: room.rules,
       });
-      const first = room.players[room.state.turn].name;
       room.players.forEach((p, i) => {
         sendTo(p, {
           t: 'start',
           code: room.code,
           token: p.token,
           view: Engine.view(room.state, i),
-        });
-        sendTo(p, {
-          t: 'state',
-          view: Engine.view(room.state, i),
-          msg: `Game on — ${first} goes first.`,
         });
       });
       break;
@@ -312,7 +265,7 @@ function handleMessage(ws, m) {
       const room = rooms.get(String(m.code || '').toUpperCase());
       const idx = room ? room.players.findIndex((p) => p.token === m.token) : -1;
       if (idx === -1 || !room.state) {
-        return sendTo({ ws }, { t: 'error', error: 'That game is no longer available.' });
+        return sendTo({ ws }, { t: 'error', code: 'gone', error: 'That game is no longer available.' });
       }
       const player = room.players[idx];
       player.ws = ws;
@@ -321,9 +274,9 @@ function handleMessage(ws, m) {
       ws.room = room;
       ws.playerIndex = idx;
       sendTo(player, { t: 'start', code: room.code, token: player.token, view: Engine.view(room.state, idx) });
-      sendTo(player, { t: 'state', view: Engine.view(room.state, idx), msg: 'Reconnected.' });
+      sendTo(player, { t: 'state', view: Engine.view(room.state, idx), evt: { a: 'rejoined', by: idx } });
       for (const otherP of othersOf(room, idx)) {
-        sendTo(otherP, { t: 'opp_back', msg: `${player.name} is back.` });
+        sendTo(otherP, { t: 'opp_back', name: player.name });
       }
       break;
     }
@@ -331,7 +284,7 @@ function handleMessage(ws, m) {
     case 'action': {
       const room = ws.room;
       if (!room || !room.state || ws.playerIndex == null) {
-        return sendTo({ ws }, { t: 'error', error: 'You are not in a game.' });
+        return sendTo({ ws }, { t: 'error', code: 'notInGame', error: 'You are not in a game.' });
       }
       const getArgs = ACTION_ARGS[m.a];
       if (!getArgs) return sendTo({ ws }, { t: 'error', error: 'Unknown action.' });
@@ -341,13 +294,18 @@ function handleMessage(ws, m) {
       }
       const res = Engine.actions[m.a](room.state, ws.playerIndex, ...args);
       if (!res.ok) {
-        return sendTo(room.players[ws.playerIndex], { t: 'error', error: res.error });
+        return sendTo(room.players[ws.playerIndex], { t: 'error', code: res.code, params: res.params, error: res.error });
       }
-      broadcastState(room, describe(room, ws.playerIndex, m.a, res), {
+      broadcastState(room, {
         a: m.a,
+        by: ws.playerIndex,
+        card: m.a === 'drawStock' ? null : pubCard(res.card),
+        meld: m.a === 'layMeld' && res.meld ? res.meld.slots.map((sl) => pubCard(sl.card)) : null,
         openedNow: !!res.openedNow,
         won: !!res.won,
+        stalemate: !!res.stalemate,
         cleared: res.cleared ? res.cleared.length : 0,
+        handNumber: res.handNumber || null,
       });
       if (res.won || res.stalemate) {
         const seats = room.players.map((p) => ({ pid: p.pid, name: p.name }));
@@ -367,10 +325,7 @@ function handleMessage(ws, m) {
       if (!room || ws.playerIndex == null) return;
       if (room.state && !room.state.over) {
         for (const otherP of othersOf(room, ws.playerIndex)) {
-          sendTo(otherP, {
-            t: 'opp_left',
-            msg: `${room.players[ws.playerIndex].name} left the game.`,
-          });
+          sendTo(otherP, { t: 'opp_left', name: room.players[ws.playerIndex].name });
         }
       }
       rooms.delete(room.code);

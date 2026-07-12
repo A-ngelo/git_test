@@ -11,6 +11,8 @@
   const R = window.Rules;
   const AI = window.AI;
   const E = window.Engine;
+  const T = (k, p) => window.I18N.T(k, p);
+  const errText = (res) => window.I18N.errText(res);
 
   let MODE = null;   // 'local' | 'net'
   let LOCAL = null;  // { mode: 'pvc' | 'pvp' }
@@ -207,7 +209,7 @@
     if (res.ok && !res.async) {
       soundForAction(name, res);
       if (res.cleared && res.cleared.length) {
-        setMsg('A completed meld was cleared off the table.');
+        setMsg(T('hint.clearedMeld'));
       }
       // what the human takes and sheds is public info the AI may study
       if (LOCAL && LOCAL.mode === 'pvc' && res.card) {
@@ -226,13 +228,13 @@
       return;
     }
     if (LOCAL.mode === 'pvc' && S.turn === 1) {
-      setMsg((res.openedNow ? 'You opened! ' : '') + 'Computer is thinking…');
+      setMsg((res.openedNow ? T('hint.youOpened') : '') + T('cpu.thinking'));
       render();
       aiTurn();
     } else if (LOCAL.mode === 'pvp') {
       showPassScreen();
     } else {
-      setMsg('Your turn — draw from the stock or the discard pile.');
+      setMsg(T('hint.yourTurnFull'));
       render();
     }
   }
@@ -247,14 +249,14 @@
       const choice = AI.chooseDraw(S, p, opts);
       if (choice === 'discard') {
         const res = E.actions.pickDiscard(S, 1);
-        setMsg(`Computer takes ${R.cardLabel(res.card)} from the discard pile.`);
+        setMsg(T('cpu.takes', { card: R.cardLabel(res.card) }));
       } else {
         const res = E.actions.drawStock(S, 1);
         if (res.stalemate) {
           showEndScreen();
           return;
         }
-        setMsg('Computer draws from the stock.');
+        setMsg(T('cpu.draws'));
       }
       snd('draw');
       render();
@@ -275,14 +277,14 @@
       const res = E.actions.replaceJoker(S, 1, a.cardId, a.meldId);
       if (res.ok) {
         soundForAction('replaceJoker', res);
-        setMsg('Computer swaps the real card in and reclaims the joker!');
+        setMsg(T('cpu.reclaims'));
       }
     } else if (a.type === 'meld') {
       const res = E.actions.layMeld(S, 1, a.cardIds);
       if (res.ok) {
         soundForAction('layMeld', res);
         const label = res.meld.slots.map((s) => R.cardLabel(s.card)).join(' ');
-        setMsg(`Computer plays ${label}.`);
+        setMsg(T('cpu.plays', { cards: label }));
       }
     } else if (a.type === 'attach') {
       const card = p.hand.find((c) => c.id === a.cardId);
@@ -290,7 +292,7 @@
       if (target) {
         const res = E.actions.attach(S, 1, card.id, target.id);
         if (res.ok) soundForAction('attach', res);
-        setMsg(`Computer attaches ${R.cardLabel(card)}.`);
+        setMsg(T('cpu.attaches', { card: R.cardLabel(card) }));
       }
     } else if (a.type === 'discard') {
       const res = E.actions.discard(S, 1, a.cardId);
@@ -302,8 +304,8 @@
         }
         snd('turn');
         setMsg(
-          (res.openedNow ? 'Computer opened! ' : '') +
-            `Computer discards ${R.cardLabel(res.card)}. Your turn.`
+          (res.openedNow ? T('cpu.opened') : '') +
+            T('cpu.discards', { card: R.cardLabel(res.card) })
         );
       }
       render();
@@ -368,8 +370,8 @@
       chip.innerHTML =
         `<span class="p-name"></span>` +
         `<span class="p-score">${vm.scores[i]}/${vm.target}</span>` +
-        `<span class="p-count">${o.handCount} cards</span>` +
-        `<span class="p-open${o.opened ? ' on' : ''}">${o.opened ? 'opened' : 'not opened'}</span>`;
+        `<span class="p-count">${T('game.cards', { n: o.handCount })}</span>` +
+        `<span class="p-open${o.opened ? ' on' : ''}">${o.opened ? T('game.opened') : T('game.notOpened')}</span>`;
       chip.querySelector('.p-name').textContent = o.name;
       block.appendChild(chip);
       const mini = document.createElement('div');
@@ -388,7 +390,7 @@
     if (vm.melds.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'table-hint';
-      empty.textContent = 'Melds land here — open with 40+ points';
+      empty.textContent = T('game.tableHint');
       meldsBox.appendChild(empty);
     }
     for (const m of vm.melds) {
@@ -413,9 +415,9 @@
     }
 
     // piles
-    $('stock-count').textContent = vm.stockCount;
+    $('stock-label').textContent = T('game.left', { n: vm.stockCount });
     $('cleared').classList.toggle('hidden', vm.clearedCount === 0);
-    $('cleared-count').textContent = vm.clearedCount;
+    $('cleared-label').textContent = T('game.cleared', { n: vm.clearedCount });
     const discardBox = $('discard');
     discardBox.innerHTML = '';
     if (vm.discardTop) discardBox.appendChild(cardEl(vm.discardTop));
@@ -427,12 +429,12 @@
 
     // my bar
     $('me-name').textContent = me.name;
-    $('me-opened').textContent = me.opened ? 'opened' : 'not opened';
+    $('me-opened').textContent = me.opened ? T('game.opened') : T('game.notOpened');
     $('me-opened').classList.toggle('on', me.opened);
     const myTurn = isMyTurn(vm);
     $('me-open-pts').textContent =
       !me.opened && vm.provisionalPoints > 0 && myTurn
-        ? `opening: ${vm.provisionalPoints}/40`
+        ? T('game.opening', { pts: vm.provisionalPoints })
         : '';
 
     const handBox = $('hand');
@@ -459,13 +461,10 @@
     // hint line
     let hint = view.msg;
     if (!hint && myTurn) {
-      hint =
-        vm.phase === 'draw'
-          ? 'Draw from the stock or take the discard.'
-          : 'Play melds, attach cards, then discard one card to end your turn.';
+      hint = vm.phase === 'draw' ? T('hint.draw') : T('hint.play');
     }
     if (!hint && !myTurn && MODE === 'net' && !vm.over) {
-      hint = `Waiting for ${vm.players[vm.turn].name}…`;
+      hint = T('hint.waiting', { name: vm.players[vm.turn].name });
     }
     $('msgbar').textContent = hint;
     $('stock').classList.toggle('clickable', myTurn && vm.phase === 'draw');
@@ -485,7 +484,7 @@
     const vm = getVM();
     if (!isMyTurn(vm)) return;
     if (vm.phase !== 'play') {
-      setMsg('Draw a card first.');
+      setMsg(T('hint.drawFirst'));
       render();
       return;
     }
@@ -499,12 +498,12 @@
     const vm = getVM();
     if (!isMyTurn(vm)) return;
     if (vm.phase !== 'draw') {
-      setMsg('You already drew this turn.');
+      setMsg(T('hint.alreadyDrew'));
       render();
       return;
     }
     const res = actWithSound('drawStock');
-    if (!res.async) setMsg(res.ok ? '' : res.error);
+    if (!res.async) setMsg(res.ok ? '' : errText(res));
     if (res.stalemate) {
       showEndScreen();
       return;
@@ -518,11 +517,7 @@
     if (vm.phase === 'draw') {
       const res = actWithSound('pickDiscard');
       if (!res.async) {
-        setMsg(
-          res.ok
-            ? 'You must use this card in a meld before your discard (or discard it back).'
-            : res.error
-        );
+        setMsg(res.ok ? T('hint.mustUse') : errText(res));
       }
       render();
       return;
@@ -544,7 +539,7 @@
       if (card && R.canReplaceJoker(meld, card)) {
         const res = actWithSound('replaceJoker', { cardId: ids[0], meldId });
         if (!res.async) {
-          setMsg(res.ok ? 'You swapped the joker into your hand!' : res.error);
+          setMsg(res.ok ? T('hint.jokerSwap') : errText(res));
           if (res.ok) view.selected.clear();
           render();
         } else {
@@ -555,7 +550,7 @@
     }
 
     if (!me.opened) {
-      setMsg('You can attach cards only after you have opened.');
+      setMsg(T('hint.attachAfterOpen'));
       render();
       return;
     }
@@ -579,19 +574,17 @@
     }
     if (sequence.length === 0) {
       const card = vm.hand.find((c) => c.id === ids[0]);
-      setMsg(`${card ? R.cardLabel(card) : 'That card'} does not fit on that meld.`);
+      setMsg(T('hint.doesNotFit', { card: card ? R.cardLabel(card) : '?' }));
       render();
       return;
     }
     let lastError = null;
     for (const id of sequence) {
       const res = actWithSound('attach', { cardId: id, meldId });
-      if (!res.async && !res.ok) lastError = res.error;
+      if (!res.async && !res.ok) lastError = errText(res);
       else view.selected.delete(id);
     }
-    setMsg(
-      lastError || (view.selected.size ? 'Some selected cards did not fit.' : '')
-    );
+    setMsg(lastError || (view.selected.size ? T('hint.someDidntFit') : ''));
     render();
   }
 
@@ -605,16 +598,16 @@
     }
     if (!res.ok) {
       snd('error');
-      setMsg(res.error);
+      setMsg(errText(res));
     } else {
       view.selected.clear();
       const pts = E.provisionalPoints(S);
       setMsg(
         S.players[S.turn].opened
-          ? 'Meld played.'
+          ? T('hint.meldPlayed')
           : pts >= 40
-            ? `Opening total ${pts} — discard to confirm your opening.`
-            : `Opening total ${pts}/40 — keep going.`
+            ? T('hint.openingOk', { pts })
+            : T('hint.openingGo', { pts })
       );
     }
     render();
@@ -628,7 +621,7 @@
     if (res.async) return;
     if (!res.ok) {
       snd('error');
-      setMsg(res.error);
+      setMsg(errText(res));
       render();
       return;
     }
@@ -640,7 +633,7 @@
     const vm = getVM();
     if (!isMyTurn(vm) || vm.phase !== 'play') return;
     const res = actWithSound('takeBack');
-    if (!res.async) setMsg(res.ok ? 'Opening melds returned to your hand.' : res.error);
+    if (!res.async) setMsg(res.ok ? T('hint.tookBack') : errText(res));
     render();
   }
 
@@ -648,7 +641,7 @@
     const vm = getVM();
     if (!isMyTurn(vm)) return;
     const res = actWithSound('undoPickup');
-    if (!res.async) setMsg(res.ok ? 'Pickup undone — draw from the stock.' : res.error);
+    if (!res.async) setMsg(res.ok ? T('hint.pickupUndone') : errText(res));
     render();
   }
 
@@ -680,7 +673,7 @@
   }
 
   function showPassScreen() {
-    $('pass-name').textContent = S.players[S.turn].name;
+    $('pass-to').textContent = T('pass.turn', { name: S.players[S.turn].name });
     show('pass-screen');
   }
 
@@ -692,7 +685,7 @@
       $('end-scores').textContent = '';
       $('end-cards').innerHTML = '';
       $('btn-next').classList.add('hidden');
-      $('btn-again').textContent = 'Back to menu';
+      $('btn-again').textContent = T('end.menu');
       show('end-screen');
       return;
     }
@@ -702,29 +695,29 @@
       .filter(Boolean)
       .join(' · ');
     if (!w && !vm.matchOver) {
-      $('end-title').textContent = 'Dead hand — nobody could draw';
+      $('end-title').textContent = T('end.dead');
       $('end-detail').textContent = takes;
     } else if (vm.matchOver) {
       const standings = (vm.matchRanking || [])
         .map((i, place) => `${place + 1}. ${vm.players[i].name} (${vm.scores[i]})`)
         .join('  ');
-      $('end-title').textContent = `★ ${vm.players[vm.matchWinner].name} wins the match! ★`;
+      $('end-title').textContent = T('end.winsMatch', { name: vm.players[vm.matchWinner].name });
       $('end-detail').textContent = standings;
     } else {
-      $('end-title').textContent = `★ ${w.name} wins hand ${vm.handNumber}! ★`;
+      $('end-title').textContent = T('end.winsHand', { name: w.name, n: vm.handNumber });
       $('end-detail').textContent = takes;
     }
     if (!w) $('end-cards').innerHTML = '';
     $('end-scores').textContent =
       vm.players.map((pl, i) => `${pl.name} ${vm.scores[i]}`).join(' · ') +
-      ` — reach ${vm.target} and you lose the match`;
+      T('end.scores', { target: vm.target });
     const box = $('end-cards');
     box.innerHTML = '';
     if (vm.players.length === 2 && vm.loserHands) {
       for (const c of vm.loserHands.find(Boolean) || []) box.appendChild(cardEl(c, { small: true }));
     }
     $('btn-next').classList.toggle('hidden', vm.matchOver);
-    $('btn-again').textContent = vm.matchOver ? 'Back to menu' : 'Quit match';
+    $('btn-again').textContent = vm.matchOver ? T('end.menu') : T('end.quit');
     snd(vm.winner === vm.you || (vm.matchOver && vm.matchWinner === vm.you) ? 'win' : 'lose');
     show('end-screen');
     if (window.Monetize) window.Monetize.onHandEnd();
@@ -799,13 +792,13 @@
     snd('deal');
     show('game-screen');
     if (mode === 'pvc' && S.turn === 1) {
-      setMsg('Computer goes first…');
+      setMsg(T('cpu.first'));
       render();
       aiTurn();
     } else if (mode === 'pvp') {
       showPassScreen();
     } else {
-      setMsg('You go first — draw a card.');
+      setMsg(T('hint.youFirst'));
       render();
     }
   }
@@ -822,7 +815,7 @@
     const seats = chosenSeats();
     window.NET.create(name, target, seats, getPid(), chosenRules());
     $('room-code-echo').textContent = '…';
-    $('wait-target').textContent = `${seats}-player match to ${target}.`;
+    $('wait-target').textContent = T('wait.matchTo', { seats, target });
     $('wait-count').textContent = '';
     show('wait-screen');
   }
@@ -831,7 +824,7 @@
     const name = $('name1').value.trim() || 'Player 2';
     const code = $('room-code').value.trim().toUpperCase();
     if (!code) {
-      $('online-msg').textContent = 'Enter the room code you were given.';
+      $('online-msg').textContent = T('menu.enterCode');
       return;
     }
     window.NET.join(code, name, getPid());
@@ -844,20 +837,22 @@
     };
     NET.onLobby = (joined, size, code) => {
       $('room-code-echo').textContent = code;
-      $('wait-count').textContent = `${joined}/${size} players in.`;
+      $('wait-count').textContent = T('wait.count', { joined, size });
       show('wait-screen');
     };
     NET.onStart = () => {
       MODE = 'net';
       view.selected.clear();
-      setMsg('');
+      const vm = getVM();
+      setMsg(T('net.gameOn', { name: vm.players[vm.turn].name }));
       snd('deal');
       show('game-screen');
       render();
     };
-    NET.onState = (msg, evt) => {
+    NET.onState = (evt) => {
       if (MODE !== 'net') return;
       const vm = getVM();
+      const msg = buildNetMsg(evt, vm);
       if (msg) setMsg(msg);
       if (evt && evt.a) soundForAction(evt.a, evt);
       if (vm.over) {
@@ -869,20 +864,64 @@
         render();
       }
     };
-    NET.onError = (error) => {
+    NET.onError = (e) => {
+      const text = errText(e);
       if (MODE === 'net' && !$('game-screen').classList.contains('hidden')) {
-        setMsg(error);
+        setMsg(text);
         render();
       } else {
-        $('online-msg').textContent = error;
+        $('online-msg').textContent = text;
       }
     };
-    NET.onOppLeft = (msg) => {
-      showEndScreen('Opponent left', msg || 'Your opponent left the game.');
+    NET.onOppOffline = (name) => {
+      setMsg(T('net.oppOffline', { name }));
+      render();
     };
-    NET.onClosed = (msg) => {
-      if (MODE === 'net') showEndScreen('Connection lost', msg || 'The connection was lost.');
+    NET.onOppBack = (name) => {
+      setMsg(T('net.oppBack', { name }));
+      render();
     };
+    NET.onOppLeft = (name) => {
+      showEndScreen(T('net.oppLeftTitle'), T('net.oppLeftMsg', { name: name || '?' }));
+    };
+    NET.onClosed = () => {
+      if (MODE === 'net') showEndScreen(T('net.connLostTitle'), T('net.connLost'));
+    };
+  }
+
+  /* Compose a localized move description from a server event. */
+  function buildNetMsg(evt, vm) {
+    if (!evt || !evt.a || !vm) return '';
+    const who = vm.players[evt.by];
+    const name = who ? who.name : '?';
+    const card = evt.card ? R.cardLabel(evt.card) : '';
+    let msg = '';
+    switch (evt.a) {
+      case 'drawStock': msg = T('net.drew', { name }); break;
+      case 'pickDiscard': msg = T('net.took', { name, card }); break;
+      case 'undoPickup': msg = T('net.putBack', { name, card }); break;
+      case 'layMeld':
+        msg = T('net.played', {
+          name,
+          cards: (evt.meld || []).map((c) => R.cardLabel(c)).join(' '),
+        });
+        break;
+      case 'attach': msg = T('net.attached', { name, card }); break;
+      case 'replaceJoker': msg = T('net.swapped', { name, card }); break;
+      case 'takeBack': msg = T('net.tookBack', { name }); break;
+      case 'discard':
+        msg =
+          (evt.openedNow ? T('net.opened', { name }) : '') +
+          T(evt.won ? 'net.discardedWins' : 'net.discarded', { name, card });
+        break;
+      case 'nextHand':
+        msg = T('net.handDealt', { n: evt.handNumber, name: vm.players[vm.turn].name });
+        break;
+      case 'rejoined': msg = T('net.reconnected'); break;
+    }
+    if (evt.cleared) msg += T('net.cleared');
+    if (evt.stalemate) msg += T('net.dead');
+    return msg;
   }
 
   /* ================= ranked stats screen ================= */
@@ -914,7 +953,7 @@
       if (!m || !m.games) {
         const p = document.createElement('p');
         p.className = 'online-msg';
-        p.textContent = 'No ranked games in this mode yet — finish an online match to get on the board.';
+        p.textContent = T('stats.none');
         my.appendChild(p);
       } else {
         const losses = m.games - m.wins;
@@ -924,18 +963,18 @@
         const avg = handsLost > 0 ? Math.round(m.pointsTaken / handsLost) : 0;
         const grid = document.createElement('div');
         grid.className = 'stat-grid';
-        grid.appendChild(statTile('Rating', m.rating));
-        grid.appendChild(statTile('Record', `${m.wins}-${losses}`, `${pct}% wins`));
-        grid.appendChild(statTile('Streak', streak, `best W${m.bestStreak}`));
-        grid.appendChild(statTile('Matches', m.games));
-        grid.appendChild(statTile('Hands', `${m.handsWon}/${m.handsPlayed}`, 'won/played'));
-        grid.appendChild(statTile('Avg taken', avg, 'pts/lost hand'));
+        grid.appendChild(statTile(T('stats.rating'), m.rating));
+        grid.appendChild(statTile(T('stats.record'), `${m.wins}-${losses}`, T('stats.winsPct', { pct })));
+        grid.appendChild(statTile(T('stats.streak'), streak, T('stats.best', { n: m.bestStreak })));
+        grid.appendChild(statTile(T('stats.matches'), m.games));
+        grid.appendChild(statTile(T('stats.hands'), `${m.handsWon}/${m.handsPlayed}`, T('stats.wonPlayed')));
+        grid.appendChild(statTile(T('stats.avg'), avg, T('stats.perHand')));
         my.appendChild(grid);
       }
       if (!board.length) {
         const p = document.createElement('p');
         p.className = 'online-msg';
-        p.textContent = 'Nobody on this ladder yet.';
+        p.textContent = T('stats.nobody');
         lb.appendChild(p);
       }
       board.forEach((e, i) => {
@@ -949,8 +988,7 @@
       my.innerHTML = '';
       const p = document.createElement('p');
       p.className = 'online-msg';
-      p.textContent =
-        'The ranked ladder lives on the game server — open the app from your hosted server to see it.';
+      p.textContent = T('stats.serverOnly');
       my.appendChild(p);
     }
   }
@@ -989,6 +1027,23 @@
         } catch {}
       });
     }
+    const langBtns = [...document.querySelectorAll('.lang-btn')];
+    const syncLang = () => {
+      langBtns.forEach((x) => x.classList.toggle('active', x.dataset.lang === window.I18N.lang()));
+    };
+    for (const b of langBtns) {
+      b.addEventListener('click', () => {
+        window.I18N.setLang(b.dataset.lang);
+        syncLang();
+        const sb = $('btn-sound');
+        sb.textContent = window.Sound && window.Sound.muted() ? T('game.soundOff') : T('game.soundOn');
+        if (!$('stats-screen').classList.contains('hidden')) renderStatsScreen();
+        render();
+      });
+    }
+    window.I18N.applyStatic();
+    syncLang();
+
     for (const cls of ['hr-sweep', 'hr-joker']) {
       const btns = [...document.querySelectorAll('.' + cls)];
       try {
@@ -1031,7 +1086,8 @@
     $('btn-undopick').addEventListener('click', onUndoPick);
     const soundBtn = $('btn-sound');
     const syncSound = () => {
-      soundBtn.textContent = window.Sound && window.Sound.muted() ? '♪ off' : '♪ on';
+      soundBtn.textContent =
+        window.Sound && window.Sound.muted() ? T('game.soundOff') : T('game.soundOn');
     };
     soundBtn.addEventListener('click', () => {
       if (window.Sound) window.Sound.toggle();
@@ -1042,7 +1098,7 @@
     $('btn-sort-suit').addEventListener('click', () => sortHand(true));
     $('btn-sort-rank').addEventListener('click', () => sortHand(false));
     $('btn-pass-continue').addEventListener('click', () => {
-      setMsg(`${S.players[S.turn].name}, draw from the stock or the discard pile.`);
+      setMsg(T('hint.passDraw', { name: S.players[S.turn].name }));
       show('game-screen');
       render();
     });
@@ -1062,11 +1118,11 @@
       } else {
         show('game-screen');
         if (S.turn === 1) {
-          setMsg(`Hand ${S.handNumber} — Computer starts…`);
+          setMsg(T('cpu.handStart', { n: S.handNumber }));
           render();
           aiTurn();
         } else {
-          setMsg(`Hand ${S.handNumber} — you start. Draw a card.`);
+          setMsg(T('hint.handStart', { n: S.handNumber }));
           render();
         }
       }
@@ -1104,13 +1160,13 @@
       $('btn-remove-ads').addEventListener('click', async () => {
         note.textContent = '';
         const res = await window.Monetize.buyRemoveAds();
-        note.textContent = res.ok ? 'Ads removed — thank you!' : res.error;
+        note.textContent = res.ok ? T('iap.removed') : res.error;
         refresh();
       });
       $('btn-restore-ads').addEventListener('click', async () => {
         note.textContent = '';
         const res = await window.Monetize.restorePurchases();
-        note.textContent = res.ok ? 'Purchase restored — ads removed.' : res.error;
+        note.textContent = res.ok ? T('iap.restored') : res.error;
         refresh();
       });
     }

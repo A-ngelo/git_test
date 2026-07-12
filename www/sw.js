@@ -3,12 +3,13 @@
  * online rooms still need a connection — WebSockets bypass this worker).
  * Bump VERSION on release to invalidate old caches.
  */
-const VERSION = 'scala40-v5';
+const VERSION = 'scala40-v6';
 const SHELL = [
   './',
   'index.html',
   'manifest.webmanifest',
   'css/style.css',
+  'js/i18n.js',
   'js/sound.js',
   'js/rules.js',
   'js/engine.js',

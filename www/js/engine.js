@@ -17,7 +17,7 @@
       ? require('./rules.js')
       : global.Rules;
 
-  const err = (error) => ({ ok: false, error });
+  const err = (code, error, params) => ({ ok: false, code, error, params });
   const ok = (extra) => Object.assign({ ok: true }, extra);
 
   function newGame(names, opts) {
@@ -68,8 +68,8 @@
   /* Deal the next hand of the match: fresh deck, scores carried over,
    * the lead alternating between hands. Either player may trigger it. */
   function nextHand(S) {
-    if (!S.over) return err('The hand is not over yet.');
-    if (S.matchOver) return err('The match is over.');
+    if (!S.over) return err('handNotOver', 'The hand is not over yet.');
+    if (S.matchOver) return err('matchOver', 'The match is over.');
     const deck = R.shuffle(R.makeDeck());
     for (const pl of S.players) {
       pl.hand = [];
@@ -105,10 +105,12 @@
   }
 
   function guard(S, p, phase) {
-    if (S.over) return 'The game is over.';
-    if (S.turn !== p) return 'Not your turn.';
+    if (S.over) return ['gameOver', 'The game is over.'];
+    if (S.turn !== p) return ['notYourTurn', 'Not your turn.'];
     if (phase && S.phase !== phase) {
-      return phase === 'draw' ? 'You already drew this turn.' : 'Draw a card first.';
+      return phase === 'draw'
+        ? ['alreadyDrew', 'You already drew this turn.']
+        : ['drawFirst', 'Draw a card first.'];
     }
     return null;
   }
@@ -155,7 +157,7 @@
 
   function drawStock(S, p) {
     const g = guard(S, p, 'draw');
-    if (g) return err(g);
+    if (g) return err(g[0], g[1]);
     recycleStockIfNeeded(S);
     if (S.stock.length === 0 || S.recycleCount > MAX_RECYCLES) {
       // Dead hand: either nobody can draw at all, or the stock has gone
@@ -189,9 +191,9 @@
 
   function pickDiscard(S, p) {
     const g = guard(S, p, 'draw');
-    if (g) return err(g);
-    if (S.mustStock) return err('You put that card back — draw from the stock.');
-    if (S.discard.length === 0) return err('The discard pile is empty.');
+    if (g) return err(g[0], g[1]);
+    if (S.mustStock) return err('mustStock', 'You put that card back — draw from the stock.');
+    if (S.discard.length === 0) return err('emptyDiscard', 'The discard pile is empty.');
     const card = S.discard.pop();
     S.players[p].hand.push(card);
     S.lastDraw = { p, id: card.id };
@@ -203,9 +205,9 @@
 
   function undoPickup(S, p) {
     const g = guard(S, p, 'play');
-    if (g) return err(g);
-    if (S.picked == null) return err('Nothing to undo.');
-    if (S.actedAfterPick) return err('Too late to undo — you already played.');
+    if (g) return err(g[0], g[1]);
+    if (S.picked == null) return err('nothingToUndo', 'Nothing to undo.');
+    if (S.actedAfterPick) return err('tooLate', 'Too late to undo — you already played.');
     const player = S.players[p];
     const card = player.hand.find((c) => c.id === S.picked);
     removeFromHand(player, [card.id]);
@@ -219,15 +221,16 @@
 
   function layMeld(S, p, cardIds) {
     const g = guard(S, p, 'play');
-    if (g) return err(g);
-    if (!Array.isArray(cardIds)) return err('No cards selected.');
+    if (g) return err(g[0], g[1]);
+    if (!Array.isArray(cardIds)) return err('notInHand', 'No cards selected.');
     const player = S.players[p];
     const cards = player.hand.filter((c) => cardIds.includes(c.id));
-    if (cards.length !== cardIds.length) return err('Card not in hand.');
-    if (cards.length === player.hand.length) return err('You must keep a card to discard.');
+    if (cards.length !== cardIds.length) return err('notInHand', 'Card not in hand.');
+    if (cards.length === player.hand.length) return err('keepOne', 'You must keep a card to discard.');
     const m = R.validateMeld(cards);
     if (!m) {
       return err(
+        'badMeld',
         'Not a valid meld: 3+ same rank (different suits) or 3+ in a row of one suit, max one joker.'
       );
     }
@@ -244,14 +247,14 @@
 
   function attach(S, p, cardId, meldId) {
     const g = guard(S, p, 'play');
-    if (g) return err(g);
+    if (g) return err(g[0], g[1]);
     const player = S.players[p];
-    if (!player.opened) return err('You can attach cards only after opening (in an earlier turn).');
-    if (player.hand.length <= 1) return err('You must keep a card to discard.');
+    if (!player.opened) return err('attachClosed', 'You can attach cards only after opening (in an earlier turn).');
+    if (player.hand.length <= 1) return err('keepOne', 'You must keep a card to discard.');
     const card = player.hand.find((c) => c.id === cardId);
     const meld = S.melds.find((m) => m.id === meldId);
-    if (!card || !meld) return err('Nothing to attach.');
-    if (!R.applyAttach(meld, card)) return err(`${R.cardLabel(card)} does not fit on that meld.`);
+    if (!card || !meld) return err('nothingAttach', 'Nothing to attach.');
+    if (!R.applyAttach(meld, card)) return err('noFit', `${R.cardLabel(card)} does not fit on that meld.`, { card: R.cardLabel(card) });
     removeFromHand(player, [card.id]);
     if (S.picked != null) S.actedAfterPick = true;
     return ok({ card, meld, cleared: sweepCompleted(S) });
@@ -259,20 +262,20 @@
 
   function replaceJoker(S, p, cardId, meldId) {
     const g = guard(S, p, 'play');
-    if (g) return err(g);
+    if (g) return err(g[0], g[1]);
     const player = S.players[p];
-    if (!player.opened) return err('You can swap jokers only after opening.');
+    if (!player.opened) return err('swapClosed', 'You can swap jokers only after opening.');
     const card = player.hand.find((c) => c.id === cardId);
     const meld = S.melds.find((m) => m.id === meldId);
-    if (!card || !meld) return err('Nothing to swap.');
+    if (!card || !meld) return err('nothingSwap', 'Nothing to swap.');
     if (
       S.rules.strictJoker &&
       S.reclaimed.some((id) => player.hand.some((c) => c.id === id))
     ) {
-      return err('Use the reclaimed joker before taking another.');
+      return err('oneReclaim', 'Use the reclaimed joker before taking another.');
     }
     const joker = R.applyReplaceJoker(meld, card);
-    if (!joker) return err('That card cannot replace the joker.');
+    if (!joker) return err('cannotReplace', 'That card cannot replace the joker.');
     removeFromHand(player, [card.id]);
     player.hand.push(joker);
     if (S.rules.strictJoker) S.reclaimed.push(joker.id);
@@ -282,8 +285,8 @@
 
   function takeBack(S, p) {
     const g = guard(S, p, 'play');
-    if (g) return err(g);
-    if (S.provisional.length === 0) return err('Nothing to take back.');
+    if (g) return err(g[0], g[1]);
+    if (S.provisional.length === 0) return err('nothingBack', 'Nothing to take back.');
     const player = S.players[p];
     const ids = new Set(S.provisional);
     for (const m of S.melds.filter((x) => ids.has(x.id))) {
@@ -297,22 +300,22 @@
 
   function discard(S, p, cardId) {
     const g = guard(S, p, 'play');
-    if (g) return err(g);
+    if (g) return err(g[0], g[1]);
     const player = S.players[p];
     const card = player.hand.find((c) => c.id === cardId);
-    if (!card) return err('Card not in hand.');
+    if (!card) return err('notInHand', 'Card not in hand.');
 
     const pts = provisionalPoints(S);
     if (pts > 0 && pts < 40) {
-      return err(`Opening needs 40+ points — you have ${pts}. Lay more melds or take them back.`);
+      return err('need40', `Opening needs 40+ points — you have ${pts}. Lay more melds or take them back.`, { pts });
     }
     if (S.picked != null && cardId !== S.picked && player.hand.some((c) => c.id === S.picked)) {
-      return err('Meld the card you took from the discard pile first (or discard that same card).');
+      return err('usePicked', 'Meld the card you took from the discard pile first (or discard that same card).');
     }
     if (S.rules.strictJoker) {
       const held = S.reclaimed.find((id) => player.hand.some((c) => c.id === id));
       if (held != null && cardId !== held) {
-        return err('Strict rule: replay the reclaimed joker this turn (or discard it).');
+        return err('strictJoker', 'Strict rule: replay the reclaimed joker this turn (or discard it).');
       }
     }
 

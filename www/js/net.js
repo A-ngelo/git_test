@@ -14,12 +14,15 @@
     token: null,
     active: false,
     // callbacks assigned by game.js
-    onCreated: null, // (code)
-    onStart: null,   // ()
-    onState: null,   // (msg)
-    onError: null,   // (error)
-    onOppLeft: null, // (msg)
-    onClosed: null,  // (msg)
+    onCreated: null,    // (code)
+    onLobby: null,      // (joined, size, code)
+    onStart: null,      // ()
+    onState: null,      // (evt)
+    onError: null,      // ({ code, params, error })
+    onOppLeft: null,    // (name)
+    onOppOffline: null, // (name)
+    onOppBack: null,    // (name)
+    onClosed: null,     // ()
   };
 
   let queue = [];        // messages queued while the socket opens
@@ -82,18 +85,20 @@
           break;
         case 'state':
           NET.view = m.view;
-          if (NET.onState) NET.onState(m.msg || '', m.evt || null);
+          if (NET.onState) NET.onState(m.evt || null);
           break;
         case 'error':
-          if (NET.onError) NET.onError(m.error || 'Something went wrong.');
+          if (NET.onError) NET.onError(m);
           break;
         case 'opp_left':
           NET.active = false;
-          if (NET.onOppLeft) NET.onOppLeft(m.msg);
+          if (NET.onOppLeft) NET.onOppLeft(m.name);
           break;
         case 'opp_offline':
+          if (NET.onOppOffline) NET.onOppOffline(m.name);
+          break;
         case 'opp_back':
-          if (NET.onState) NET.onState(m.msg || '');
+          if (NET.onOppBack) NET.onOppBack(m.name);
           break;
       }
     };
@@ -109,7 +114,7 @@
         }, 1000 * rejoinTries);
       } else if (NET.active) {
         NET.active = false;
-        if (NET.onClosed) NET.onClosed('Lost the connection to the server.');
+        if (NET.onClosed) NET.onClosed();
       }
     };
   }

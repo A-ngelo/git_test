@@ -27,6 +27,12 @@
         <button id="btn-online" class="mode-btn" type="button">▶ Online</button>
       </div>
 
+      <div class="target-row" id="lang-row">
+        <span class="target-label">Language</span>
+        <button class="target-btn lang-btn" data-lang="en" type="button">EN</button>
+        <button class="target-btn lang-btn" data-lang="it" type="button">IT</button>
+      </div>
+
       <div class="target-row" id="diff-row">
         <span class="target-label">CPU</span>
         <button class="target-btn diff-btn" data-diff="easy" type="button">Easy</button>
@@ -113,7 +119,7 @@
       <h2>Room ready</h2>
       <p class="pass-to">Share this code with your opponent:</p>
       <div id="room-code-echo" class="room-code">…</div>
-      <p class="online-msg"><span id="wait-target"></span> The game starts when everyone joins.</p>
+      <p class="online-msg"><span id="wait-target"></span> <span id="wait-starts"></span></p>
       <p class="online-msg" id="wait-count"></p>
       <button id="btn-wait-cancel" class="primary-btn" type="button">Cancel</button>
     </div>
@@ -123,7 +129,7 @@
   <div class="screen hidden" id="pass-screen">
     <div class="panel">
       <h2>Pass the device</h2>
-      <p class="pass-to">It’s <b id="pass-name"></b>’s turn</p>
+      <p class="pass-to" id="pass-to"></p>
       <button id="btn-pass-continue" class="primary-btn" type="button">I’m ready</button>
     </div>
   </div>
@@ -139,12 +145,12 @@
       <div id="piles">
         <div class="pile" id="stock" title="Stock — click to draw">
           <div class="card back"></div>
-          <span class="pile-label"><span id="stock-count"></span> left</span>
+          <span class="pile-label" id="stock-label"></span>
         </div>
         <div class="pile" id="discard" title="Discard pile"></div>
         <div class="pile hidden" id="cleared" title="Completed melds — out of play">
           <div class="card back cleared-stack"></div>
-          <span class="pile-label"><span id="cleared-count"></span> cleared</span>
+          <span class="pile-label" id="cleared-label"></span>
         </div>
       </div>
     </main>
@@ -200,6 +206,7 @@
     </div>
   </div>
 
+  <script src="js/i18n.js"></script>
   <script src="js/sound.js"></script>
   <script src="js/rules.js"></script>
   <script src="js/engine.js"></script>
