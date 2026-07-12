@@ -114,9 +114,9 @@
     };
   }
 
-  NET.create = (name, target, seats, pid) => {
+  NET.create = (name, target, seats, pid, rules) => {
     NET.reset();
-    send({ t: 'create', name, target, seats, pid });
+    send({ t: 'create', name, target, seats, pid, rules });
   };
 
   NET.join = (code, name, pid) => {

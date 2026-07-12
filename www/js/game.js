@@ -747,6 +747,16 @@
       level: LOCAL.level || 'medium',
       memory: LOCAL.aiMemory,
       minOppHand: S.players[0].hand.length,
+      strictJoker: S.rules.strictJoker,
+    };
+  }
+
+  function chosenRules() {
+    const sweepBtn = document.querySelector('.hr-sweep.active');
+    const jokerBtn = document.querySelector('.hr-joker.active');
+    return {
+      sweep: !sweepBtn || sweepBtn.dataset.v === 'on',
+      strictJoker: !!jokerBtn && jokerBtn.dataset.v === 'strict',
     };
   }
 
@@ -783,7 +793,7 @@
       names = [n1, $('name2').value.trim() || 'Player 2'];
       for (let i = 3; i <= chosenSeats(); i++) names.push(`Player ${i}`);
     }
-    S = E.newGame(names, { target: chosenTarget() });
+    S = E.newGame(names, { target: chosenTarget(), rules: chosenRules() });
     view.selected.clear();
     setMsg('');
     snd('deal');
@@ -810,7 +820,7 @@
     const name = $('name1').value.trim() || 'Player 1';
     const target = chosenTarget();
     const seats = chosenSeats();
-    window.NET.create(name, target, seats, getPid());
+    window.NET.create(name, target, seats, getPid(), chosenRules());
     $('room-code-echo').textContent = '…';
     $('wait-target').textContent = `${seats}-player match to ${target}.`;
     $('wait-count').textContent = '';
@@ -978,6 +988,21 @@
           localStorage.setItem('scala40.diff', b.dataset.diff);
         } catch {}
       });
+    }
+    for (const cls of ['hr-sweep', 'hr-joker']) {
+      const btns = [...document.querySelectorAll('.' + cls)];
+      try {
+        const saved = localStorage.getItem('scala40.' + cls);
+        if (saved) btns.forEach((x) => x.classList.toggle('active', x.dataset.v === saved));
+      } catch {}
+      for (const b of btns) {
+        b.addEventListener('click', () => {
+          btns.forEach((x) => x.classList.toggle('active', x === b));
+          try {
+            localStorage.setItem('scala40.' + cls, b.dataset.v);
+          } catch {}
+        });
+      }
     }
     const seatBtns = [...document.querySelectorAll('.seats-btn')];
     for (const b of seatBtns) {

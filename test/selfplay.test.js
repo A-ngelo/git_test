@@ -37,28 +37,34 @@ function checkInvariants(S, label) {
   for (const pl of S.players) assert(pl.hand.length >= 0 && pl.hand.length <= 30, `${label}: absurd hand`);
 }
 
-function playMatch(levels) {
-  const S = E.newGame(levels.map((l, i) => `${l}-${i}`), { target: 151 });
+function playMatch(levels, rules) {
+  const S = E.newGame(levels.map((l, i) => `${l}-${i}`), { target: 151, rules });
   const memories = levels.map(() => ({ oppPicks: [], oppDiscards: [] }));
   let guard = 0;
+  let handTurns = 0;
   let stalemates = 0;
 
-  while (!S.matchOver && guard++ < 40000) {
+  // matches can legitimately run long; only a single hand that never
+  // ends indicates a real stall
+  while (!S.matchOver && guard++ < 300000) {
     if (S.over) {
       const r = E.actions.nextHand(S);
       assert(r.ok, 'nextHand failed mid-match');
+      handTurns = 0;
       memories.forEach((m) => {
         m.oppPicks.length = 0;
         m.oppDiscards.length = 0;
       });
       continue;
     }
+    assert(++handTurns < 3000, `hand ${S.handNumber} never ends (stall)`);
     const p = S.turn;
     const player = S.players[p];
     const opts = {
       level: levels[p],
       memory: memories[p],
       minOppHand: Math.min(...S.players.filter((_, i) => i !== p).map((x) => x.hand.length)),
+      strictJoker: S.rules.strictJoker,
     };
 
     const choice = AI.chooseDraw(S, player, opts);
@@ -99,7 +105,7 @@ function playMatch(levels) {
   return { winner: S.matchWinner, hands: S.handNumber, stalemates };
 }
 
-function series(levels, count) {
+function series(levels, count, rules) {
   const wins = levels.map(() => 0);
   let hands = 0;
   let stalemates = 0;
@@ -107,7 +113,7 @@ function series(levels, count) {
     // alternate seat order so going first doesn't bias the sample
     const flipped = i % 2 === 1;
     const order = flipped ? [...levels].reverse() : levels;
-    const r = playMatch(order);
+    const r = playMatch(order, rules);
     const winnerLevelIndex = flipped ? levels.length - 1 - r.winner : r.winner;
     wins[winnerLevelIndex]++;
     hands += r.hands;
@@ -135,6 +141,13 @@ console.log(
 
 const three = series(['hard', 'medium', 'easy'], Math.max(6, Math.floor(MATCHES / 3)));
 console.log(`  3-seat h/m/e:   ${three.wins.join('-')}  (${three.hands} hands)`);
+
+// fuzz the strict house rules too: no sweeping, strict joker replay
+const strict = series(['hard', 'medium'], Math.max(6, Math.floor(MATCHES / 3)), {
+  sweep: false,
+  strictJoker: true,
+});
+console.log(`  strict rules:   ${strict.wins.join('-')}  (${strict.hands} hands)`);
 
 console.log(`\ninvariants checked after ${actionsChecked} engine actions — all held`);
 

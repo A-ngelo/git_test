@@ -53,8 +53,13 @@ the proper icon and works offline for the local modes.
 - Drag cards to arrange your hand (order is yours alone and persists), or
   use the sort buttons.
 
-Casual simplification: a retrieved joker may be kept in hand (strict rules
-require replaying it the same turn).
+**House rules** (menu panel; defaults are this app's way, online rooms use
+the creator's settings):
+- *Clear full melds* — On (default) sweeps finished jokerless melds off the
+  board; Off leaves them on the table, tournament-style.
+- *Joker reclaim* — Keep (default) lets a reclaimed joker stay in hand;
+  Strict requires replaying it the same turn (or discarding it), the
+  traditional way. Strict also allows only one reclaim per turn.
 
 ## Ranked play
 

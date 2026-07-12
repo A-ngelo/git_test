@@ -28,7 +28,13 @@
       for (const p of players) p.hand.push(deck.pop());
     }
     const firstTurn = opts.firstTurn != null ? opts.firstTurn : Math.floor(Math.random() * 2);
+    const rules = opts.rules || {};
     return {
+      // house rules: defaults are this app's way; both can be play strict
+      rules: {
+        sweep: rules.sweep !== false,          // clear finished jokerless melds
+        strictJoker: !!rules.strictJoker,      // reclaimed joker must be replayed
+      },
       players,
       stock: deck,
       discard: [deck.pop()],
@@ -41,6 +47,7 @@
       mustStock: false,     // set after undoing a pickup
       actedAfterPick: false,
       provisional: [],      // meld ids laid this turn by a not-yet-opened player
+      reclaimed: [],        // joker ids reclaimed this turn (strict rule)
       lastDraw: null,       // { p, id } — which card the current player just drew
       over: false,          // this hand is finished
       winner: null,         // winner of this hand
@@ -84,6 +91,7 @@
     S.mustStock = false;
     S.actedAfterPick = false;
     S.provisional = [];
+    S.reclaimed = [];
     S.lastDraw = null;
     S.over = false;
     S.winner = null;
@@ -111,6 +119,7 @@
    * drawable discard). Melds still holding a joker stay on the table so
    * the real card can swap it out. */
   function sweepCompleted(S) {
+    if (!S.rules.sweep) return [];
     const swept = [];
     S.melds = S.melds.filter((m) => {
       if (m.provisional) return true;
@@ -256,10 +265,17 @@
     const card = player.hand.find((c) => c.id === cardId);
     const meld = S.melds.find((m) => m.id === meldId);
     if (!card || !meld) return err('Nothing to swap.');
+    if (
+      S.rules.strictJoker &&
+      S.reclaimed.some((id) => player.hand.some((c) => c.id === id))
+    ) {
+      return err('Use the reclaimed joker before taking another.');
+    }
     const joker = R.applyReplaceJoker(meld, card);
     if (!joker) return err('That card cannot replace the joker.');
     removeFromHand(player, [card.id]);
     player.hand.push(joker);
+    if (S.rules.strictJoker) S.reclaimed.push(joker.id);
     if (S.picked != null) S.actedAfterPick = true;
     return ok({ card, meld, cleared: sweepCompleted(S) });
   }
@@ -292,6 +308,12 @@
     }
     if (S.picked != null && cardId !== S.picked && player.hand.some((c) => c.id === S.picked)) {
       return err('Meld the card you took from the discard pile first (or discard that same card).');
+    }
+    if (S.rules.strictJoker) {
+      const held = S.reclaimed.find((id) => player.hand.some((c) => c.id === id));
+      if (held != null && cardId !== held) {
+        return err('Strict rule: replay the reclaimed joker this turn (or discard it).');
+      }
     }
 
     let openedNow = false;
@@ -337,6 +359,7 @@
     S.mustStock = false;
     S.actedAfterPick = false;
     S.provisional = [];
+    S.reclaimed = [];
     S.lastDraw = null;
     return ok({ card, openedNow, cleared, won: false });
   }
@@ -361,6 +384,7 @@
       mustStock: S.turn === p ? S.mustStock : false,
       actedAfterPick: S.turn === p ? S.actedAfterPick : false,
       newCardId: S.lastDraw && S.lastDraw.p === p ? S.lastDraw.id : null,
+      rules: S.rules,
       provisionalPoints: provisionalPoints(S),
       provisionalCount: S.provisional.length,
       clearedCount: S.cleared.reduce((n, m) => n + m.slots.length, 0),

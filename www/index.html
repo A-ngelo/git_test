@@ -68,6 +68,21 @@
 
       <button id="btn-stats" class="ghost-btn" type="button">Ranked stats</button>
 
+      <details class="rules" id="house-rules">
+        <summary>House rules</summary>
+        <div class="target-row">
+          <span class="target-label">Clear full melds</span>
+          <button class="target-btn hr-sweep active" data-v="on" type="button">On</button>
+          <button class="target-btn hr-sweep" data-v="off" type="button">Off</button>
+        </div>
+        <div class="target-row">
+          <span class="target-label">Joker reclaim</span>
+          <button class="target-btn hr-joker active" data-v="keep" type="button">Keep</button>
+          <button class="target-btn hr-joker" data-v="strict" type="button">Strict</button>
+        </div>
+        <p class="online-msg">Defaults are this app's way. "Strict" means a reclaimed joker must be replayed the same turn. Online rooms use the creator's rules.</p>
+      </details>
+
       <div id="monetize-row" class="hidden">
         <button id="btn-remove-ads" type="button">★ Remove ads</button>
         <button id="btn-restore-ads" class="linkish" type="button">Restore purchase</button>

@@ -95,13 +95,21 @@ function cleanPid(pid) {
   return typeof pid === 'string' && /^[a-f0-9]{16,64}$/i.test(pid) ? pid : null;
 }
 
-function newRoom(ws, name, target, seats, pid) {
+function cleanRules(rules) {
+  return {
+    sweep: !rules || rules.sweep !== false,
+    strictJoker: !!(rules && rules.strictJoker),
+  };
+}
+
+function newRoom(ws, name, target, seats, pid, rules) {
   const room = {
     code: makeCode(),
     players: [
       { ws, name, pid, token: crypto.randomBytes(12).toString('hex'), connected: true },
     ],
     size: SEAT_COUNTS.includes(Number(seats)) ? Number(seats) : 2,
+    rules: cleanRules(rules),
     target: TARGETS.includes(Number(target)) ? Number(target) : 151,
     state: null,
     createdAt: Date.now(),
@@ -241,7 +249,7 @@ function handleMessage(ws, m) {
       if (rooms.size >= MAX_ROOMS) {
         return sendTo({ ws }, { t: 'error', error: 'Server is full right now — try again soon.' });
       }
-      const room = newRoom(ws, cleanName(m.name), m.target, m.seats, cleanPid(m.pid));
+      const room = newRoom(ws, cleanName(m.name), m.target, m.seats, cleanPid(m.pid), m.rules);
       ws.room = room;
       ws.playerIndex = 0;
       sendTo(room.players[0], { t: 'created', code: room.code, token: room.players[0].token });
@@ -279,7 +287,10 @@ function handleMessage(ws, m) {
         break;
       }
 
-      room.state = Engine.newGame(room.players.map((p) => p.name), { target: room.target });
+      room.state = Engine.newGame(room.players.map((p) => p.name), {
+        target: room.target,
+        rules: room.rules,
+      });
       const first = room.players[room.state.turn].name;
       room.players.forEach((p, i) => {
         sendTo(p, {

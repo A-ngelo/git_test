@@ -253,6 +253,14 @@
         if (!slot) continue;
         const rep = hand.find((c) => R.canReplaceJoker(m, c));
         if (!rep) continue;
+        // strict house rule: the joker must be replayed this turn, so
+        // only reclaim it when another meld can take it right away
+        if (opts.strictJoker) {
+          const usable = table.some(
+            (t) => t !== m && !t.swept && R.canAttach(t, slot.card)
+          );
+          if (!usable) continue;
+        }
         actions.push({ type: 'replaceJoker', cardId: rep.id, meldId: m.id });
         const joker = slot.card;
         slot.card = rep;
@@ -263,6 +271,9 @@
           (m.type === 'set' && m.slots.length === 4) ||
           (m.type === 'run' && m.slots.length === 13);
         if (full && !m.slots.some((sl) => sl.card.joker)) m.swept = true;
+        // strict rule: one reclaim per turn — the engine refuses another
+        // while a reclaimed joker is still in hand
+        if (opts.strictJoker) break;
       }
     }
 
@@ -313,11 +324,18 @@
       }
     }
 
-    // Honour the "use what you took from the discard pile" rule.
+    // Honour the "use what you took from the discard pile" rule, and the
+    // strict-joker rule if a reclaimed joker somehow found no home.
+    const heldJoker =
+      opts.strictJoker &&
+      actions.some((a) => a.type === 'replaceJoker') &&
+      hand.find((c) => c.joker);
     const stuck = mustUseId != null && hand.some((c) => c.id === mustUseId);
     const discard = stuck
       ? hand.find((c) => c.id === mustUseId)
-      : chooseDiscard(hand, liveTable(), { level, memory: opts.memory, danger });
+      : heldJoker
+        ? heldJoker
+        : chooseDiscard(hand, liveTable(), { level, memory: opts.memory, danger });
     actions.push({ type: 'discard', cardId: discard.id });
     return actions;
   }

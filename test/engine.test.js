@@ -220,6 +220,89 @@ t('a full set holding a joker stays until the joker is swapped out', () => {
   assert(S.players[1].hand.some((x) => x.joker), 'joker should be in hand');
 });
 
+t('house rule: sweep off leaves completed melds on the table', () => {
+  const p0 = openingHand();
+  p0[6] = c(13, '♣');
+  const deck = riggedDeck(p0, junkHand(), c(9, '♦'), [c(2, '♣'), c(6, '♦'), c(10, '♥')]);
+  const S = E.newGame(['Anna', 'Bruno'], { deck, firstTurn: 0, rules: { sweep: false } });
+  E.actions.drawStock(S, 0);
+  const h = S.players[0].hand;
+  E.actions.layMeld(S, 0, h.filter((x) => x.rank === 13 && x.suit !== '♣').map((x) => x.id));
+  E.actions.layMeld(S, 0, h.filter((x) => x.suit === '♣' && x.rank >= 5 && x.rank <= 7).map((x) => x.id));
+  E.actions.discard(S, 0, S.players[0].hand.find((x) => x.rank === 2).id);
+  E.actions.drawStock(S, 1);
+  E.actions.discard(S, 1, S.players[1].hand[0].id);
+  E.actions.drawStock(S, 0);
+  const setMeld = S.melds.find((m) => m.type === 'set');
+  const res = E.actions.attach(S, 0, S.players[0].hand.find((x) => x.rank === 13).id, setMeld.id);
+  assert(res.ok);
+  assert.strictEqual(res.cleared.length, 0);
+  assert(S.melds.some((m) => m.id === setMeld.id), 'set must stay on the table');
+  assert.strictEqual(S.cleared.length, 0);
+});
+
+t('house rule: strict joker must be replayed the same turn', () => {
+  // p0 opens with K-K-K + joker as the 4th king (44 pts), keeps the 7s
+  const p0 = openingHand();
+  p0[3] = { id: 9100, rank: 0, suit: null, joker: true }; // replaces 5♣
+  p0[4] = c(7, '♠');
+  p0[5] = c(7, '♥'); // a pair the joker could complete later
+  const deck = riggedDeck(p0, junkHand(), c(9, '♦'), [
+    c(13, '♣'), c(2, '♣'), c(6, '♦'), c(10, '♥'), c(3, '♦'),
+  ]);
+  const S = E.newGame(['Anna', 'Bruno'], {
+    deck,
+    firstTurn: 0,
+    rules: { strictJoker: true, sweep: false },
+  });
+  E.actions.drawStock(S, 0); // draws K♣
+  const h = S.players[0].hand;
+  const openIds = h.filter((x) => x.rank === 13 || x.joker).map((x) => x.id);
+  assert.strictEqual(openIds.length, 5); // 4 kings + joker -> use kings + joker set of 4? no: 3 dealt kings + drawn K♣ + joker
+  // lay K♠ K♥ K♦ + joker (set of four, one joker)
+  const lay = h.filter((x) => (x.rank === 13 && x.suit !== '♣') || x.joker).map((x) => x.id);
+  assert(E.actions.layMeld(S, 0, lay).ok);
+  assert(E.actions.discard(S, 0, S.players[0].hand.find((x) => x.rank === 2).id).ok);
+  E.actions.drawStock(S, 1);
+  E.actions.discard(S, 1, S.players[1].hand[0].id);
+  // p0 reclaims the joker with the real K♣
+  E.actions.drawStock(S, 0);
+  const meld = S.melds[0];
+  const kc = S.players[0].hand.find((x) => x.rank === 13 && x.suit === '♣');
+  assert(E.actions.replaceJoker(S, 0, kc.id, meld.id).ok);
+  const jok = S.players[0].hand.find((x) => x.joker);
+  // discarding something else is blocked while the joker sits in hand
+  const other = S.players[0].hand.find((x) => !x.joker);
+  const blocked = E.actions.discard(S, 0, other.id);
+  assert.strictEqual(blocked.ok, false);
+  assert(/joker/i.test(blocked.error));
+  // playing the joker into a new meld satisfies the rule
+  const sevens = S.players[0].hand.filter((x) => x.rank === 7).map((x) => x.id);
+  assert(E.actions.layMeld(S, 0, sevens.concat([jok.id])).ok);
+  assert(E.actions.discard(S, 0, S.players[0].hand[0].id).ok);
+});
+
+t('house rule: strict joker may be discarded as the escape hatch', () => {
+  const p0 = openingHand();
+  p0[3] = { id: 9200, rank: 0, suit: null, joker: true };
+  const deck = riggedDeck(p0, junkHand(), c(9, '♦'), [
+    c(13, '♣'), c(2, '♣'), c(6, '♦'), c(10, '♥'), c(3, '♦'),
+  ]);
+  const S = E.newGame(['Anna', 'Bruno'], { deck, firstTurn: 0, rules: { strictJoker: true } });
+  E.actions.drawStock(S, 0);
+  const h = S.players[0].hand;
+  const lay = h.filter((x) => (x.rank === 13 && x.suit !== '♣') || x.joker).map((x) => x.id);
+  E.actions.layMeld(S, 0, lay);
+  E.actions.discard(S, 0, S.players[0].hand.find((x) => x.rank === 2).id);
+  E.actions.drawStock(S, 1);
+  E.actions.discard(S, 1, S.players[1].hand[0].id);
+  E.actions.drawStock(S, 0);
+  const kc = S.players[0].hand.find((x) => x.rank === 13 && x.suit === '♣');
+  assert(E.actions.replaceJoker(S, 0, kc.id, S.melds[0].id).ok);
+  const jok = S.players[0].hand.find((x) => x.joker);
+  assert(E.actions.discard(S, 0, jok.id).ok); // allowed: the joker itself
+});
+
 t('nextHand resets the cleared pile', () => {
   const { S } = riggedGame();
   S.cleared.push({ slots: [] });
