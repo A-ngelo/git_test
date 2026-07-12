@@ -68,6 +68,11 @@
           NET.token = m.token;
           if (NET.onCreated) NET.onCreated(m.code);
           break;
+        case 'lobby':
+          NET.code = m.code;
+          NET.token = m.token || NET.token;
+          if (NET.onLobby) NET.onLobby(m.joined, m.size, m.code);
+          break;
         case 'start':
           NET.code = m.code;
           NET.token = m.token || NET.token;
@@ -109,14 +114,14 @@
     };
   }
 
-  NET.create = (name, target) => {
+  NET.create = (name, target, seats, pid) => {
     NET.reset();
-    send({ t: 'create', name, target });
+    send({ t: 'create', name, target, seats, pid });
   };
 
-  NET.join = (code, name) => {
+  NET.join = (code, name, pid) => {
     NET.reset();
-    send({ t: 'join', code, name });
+    send({ t: 'join', code, name, pid });
   };
 
   NET.action = (a, args) => {

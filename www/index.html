@@ -27,6 +27,13 @@
         <button id="btn-online" class="mode-btn" type="button">▶ Online</button>
       </div>
 
+      <div class="target-row hidden" id="seats-row">
+        <span class="target-label">Players</span>
+        <button class="target-btn seats-btn active" data-seats="2" type="button">1v1</button>
+        <button class="target-btn seats-btn" data-seats="3" type="button">3</button>
+        <button class="target-btn seats-btn" data-seats="4" type="button">4</button>
+      </div>
+
       <div class="target-row">
         <span class="target-label">Match to</span>
         <button class="target-btn" data-target="101" type="button">101</button>
@@ -52,6 +59,8 @@
         <p id="online-msg" class="online-msg"></p>
       </div>
 
+      <button id="btn-stats" class="ghost-btn" type="button">Ranked stats</button>
+
       <div id="monetize-row" class="hidden">
         <button id="btn-remove-ads" type="button">★ Remove ads</button>
         <button id="btn-restore-ads" class="linkish" type="button">Restore purchase</button>
@@ -66,8 +75,9 @@
           <li>Your first melds must total <b>40+ points</b> in a single turn (“opening”). A=11 (or 1 in A‑2‑3), face cards 10, others face value.</li>
           <li>After opening you can attach single cards to any meld on the table and swap table jokers for the real card.</li>
           <li>You may take the top discard only if you use it in a meld that turn.</li>
-          <li>Discard your last card to win the hand. The loser counts penalty points (joker 25, ace 11, faces 10, rest face value).</li>
+          <li>Discard your last card to win the hand. Losers count the cards left in hand (joker 25, ace 11, faces 10, rest face value) — or a flat <b>100</b> if they never opened.</li>
           <li>Penalty points add up hand after hand — reach the match limit (101/151/201, your pick) and you lose the match.</li>
+          <li>Play 1v1, 3, or 4 players (pass-and-play or online). Online matches are ranked — check the leaderboard from the menu.</li>
           <li>Drag cards to arrange your hand however you like, or use the sort buttons.</li>
           <li>A finished meld with no joker — all four suits, or a full A-to-K run — is automatically cleared off the table to keep the board tidy.</li>
         </ul>
@@ -81,7 +91,8 @@
       <h2>Room ready</h2>
       <p class="pass-to">Share this code with your opponent:</p>
       <div id="room-code-echo" class="room-code">…</div>
-      <p class="online-msg"><span id="wait-target"></span> The game starts the moment they join.</p>
+      <p class="online-msg"><span id="wait-target"></span> The game starts when everyone joins.</p>
+      <p class="online-msg" id="wait-count"></p>
       <button id="btn-wait-cancel" class="primary-btn" type="button">Cancel</button>
     </div>
   </div>
@@ -98,13 +109,7 @@
   <!-- ===== game ===== -->
   <div class="screen hidden" id="game-screen">
     <header id="opp-bar">
-      <div class="player-chip">
-        <span class="p-name" id="opp-name"></span>
-        <span class="p-score" id="opp-score" title="penalty points / match limit"></span>
-        <span class="p-count" id="opp-count"></span>
-        <span class="p-open" id="opp-opened"></span>
-      </div>
-      <div id="opp-hand"></div>
+      <div id="opps"></div>
     </header>
 
     <main id="table">
@@ -142,6 +147,23 @@
         <button id="btn-sound" class="ghost" type="button">♪ on</button>
       </div>
     </footer>
+  </div>
+
+  <!-- ===== ranked stats ===== -->
+  <div class="screen hidden" id="stats-screen">
+    <div class="panel stats-panel">
+      <h2>Ranked stats</h2>
+      <p class="tagline">Online matches count toward the ladder</p>
+      <div class="mode-row" id="stats-tabs">
+        <button class="mode-btn active" data-mode="2" type="button">1v1</button>
+        <button class="mode-btn" data-mode="3" type="button">3P</button>
+        <button class="mode-btn" data-mode="4" type="button">4P</button>
+      </div>
+      <div id="my-stats"></div>
+      <h3 class="lb-title">Leaderboard</h3>
+      <div id="lb-table"></div>
+      <button id="btn-stats-back" class="primary-btn" type="button">Back</button>
+    </div>
   </div>
 
   <!-- ===== end ===== -->

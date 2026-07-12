@@ -251,10 +251,21 @@ t('discarding the last card wins the hand and books the penalty', () => {
   assert(res.ok && res.won);
   assert.strictEqual(S.over, true);
   assert.strictEqual(S.winner, 0);
-  assert(res.penalty > 0);
-  assert.strictEqual(S.scores[1], res.penalty);
+  // the loser never opened -> flat 100 regardless of cards held
+  assert.strictEqual(res.penalties[1], 100);
+  assert.strictEqual(S.scores[1], 100);
   assert.strictEqual(S.scores[0], 0);
-  assert.strictEqual(S.matchOver, false); // one hand can't reach 151 here
+  assert.strictEqual(S.matchOver, false);
+});
+
+t('an opened loser counts cards; an unopened loser takes flat 100', () => {
+  const { S } = riggedGame();
+  S.players[1].opened = true; // pretend the opponent opened earlier
+  const res = winFirstHand(S);
+  assert(res.ok && res.won);
+  const counted = S.players[1].hand.reduce((sum, c) => sum + R.handPenalty(c), 0);
+  assert.strictEqual(res.penalties[1], counted);
+  assert(counted !== 100 || counted === res.penalties[1]);
 });
 
 t('nextHand deals fresh, keeps scores, alternates the lead', () => {
@@ -305,7 +316,44 @@ t('views carry the match scoreboard', () => {
   assert.deepStrictEqual(v.scores, S.scores);
   assert.strictEqual(v.target, 151);
   assert.strictEqual(v.handNumber, 1);
-  assert.strictEqual(v.lastPenalty, S.scores[1]);
+  assert.deepStrictEqual(v.lastPenalties, [0, 100]);
+  assert(Array.isArray(v.loserHands) && v.loserHands[0] === null);
+});
+
+t('three players: turns rotate, all losers booked, ranking by score', () => {
+  const names = ['A', 'B', 'C'];
+  const S = E.newGame(names, { firstTurn: 0, target: 151 });
+  assert.strictEqual(S.players.length, 3);
+  S.players.forEach((pl) => assert.strictEqual(pl.hand.length, 13));
+  // rotation 0 -> 1 -> 2 -> 0
+  for (const expect of [0, 1, 2, 0]) {
+    assert.strictEqual(S.turn, expect);
+    E.actions.drawStock(S, expect);
+    E.actions.discard(S, expect, S.players[expect].hand[0].id);
+  }
+  // force a hand end: player 1 down to one card, discards it
+  E.actions.drawStock(S, 1);
+  S.players[0].hand.push(...S.players[1].hand.splice(1));
+  const res = E.actions.discard(S, 1, S.players[1].hand[0].id);
+  assert(res.ok && res.won);
+  assert.strictEqual(res.penalties[1], 0);
+  assert.strictEqual(res.penalties[0], 100); // unopened
+  assert.strictEqual(res.penalties[2], 100); // unopened
+  assert.deepStrictEqual(S.scores, [100, 0, 100]);
+  // push someone past the target and end another hand -> ranking
+  S.scores[2] = 150;
+  E.actions.nextHand(S);
+  assert.strictEqual(S.turn, 1); // lead rotated from hand 1's leader
+  const p = S.turn;
+  E.actions.drawStock(S, p);
+  const others = [0, 1, 2].filter((i) => i !== p);
+  for (const o of others) S.players[o].hand.push(...S.players[p].hand.splice(1));
+  const win = E.actions.discard(S, p, S.players[p].hand[0].id);
+  assert(win.ok && win.won);
+  assert.strictEqual(S.matchOver, true);
+  assert.strictEqual(S.matchRanking[0], S.matchWinner);
+  const ranked = S.matchRanking.map((i) => S.scores[i]);
+  for (let i = 1; i < ranked.length; i++) assert(ranked[i - 1] <= ranked[i]);
 });
 
 /* ---- view redaction ---- */

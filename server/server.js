@@ -18,6 +18,7 @@ const { WebSocketServer } = require('ws');
 
 const R = require('../www/js/rules.js');
 const Engine = require('../www/js/engine.js');
+const Stats = require('./stats.js');
 
 const PORT = Number(process.env.PORT) || 3040;
 const ROOT = path.join(__dirname, '..', 'www');
@@ -40,6 +41,19 @@ const MIME = {
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  if (urlPath.startsWith('/api/')) {
+    const u = new URL(req.url, 'http://localhost');
+    let body = null;
+    if (urlPath === '/api/leaderboard') {
+      const mode = String(u.searchParams.get('mode') || '2');
+      if (['2', '3', '4'].includes(mode)) body = Stats.leaderboard(mode);
+    } else if (urlPath === '/api/stats') {
+      body = Stats.playerStats(String(u.searchParams.get('pid') || ''));
+    }
+    res.writeHead(body ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body || { error: 'not found' }));
+    return;
+  }
   let filePath = path.normalize(path.join(ROOT, urlPath === '/' ? 'index.html' : urlPath));
   if (!filePath.startsWith(ROOT)) {
     res.writeHead(403);
@@ -75,13 +89,19 @@ function makeCode() {
 }
 
 const TARGETS = [101, 151, 201];
+const SEAT_COUNTS = [2, 3, 4];
 
-function newRoom(ws, name, target) {
+function cleanPid(pid) {
+  return typeof pid === 'string' && /^[a-f0-9]{16,64}$/i.test(pid) ? pid : null;
+}
+
+function newRoom(ws, name, target, seats, pid) {
   const room = {
     code: makeCode(),
     players: [
-      { ws, name, token: crypto.randomBytes(12).toString('hex'), connected: true },
+      { ws, name, pid, token: crypto.randomBytes(12).toString('hex'), connected: true },
     ],
+    size: SEAT_COUNTS.includes(Number(seats)) ? Number(seats) : 2,
     target: TARGETS.includes(Number(target)) ? Number(target) : 151,
     state: null,
     createdAt: Date.now(),
@@ -90,6 +110,10 @@ function newRoom(ws, name, target) {
   };
   rooms.set(room.code, room);
   return room;
+}
+
+function othersOf(room, index) {
+  return room.players.filter((_, i) => i !== index);
 }
 
 function sendTo(player, obj) {
@@ -200,8 +224,7 @@ wss.on('connection', (ws) => {
     if (room.players.every((p) => !p.connected)) {
       room.emptySince = Date.now();
     } else {
-      const otherP = room.players[1 - ws.playerIndex];
-      if (otherP) {
+      for (const otherP of othersOf(room, ws.playerIndex)) {
         sendTo(otherP, {
           t: 'opp_offline',
           msg: `${player.name} lost connection — waiting for them to return…`,
@@ -217,7 +240,7 @@ function handleMessage(ws, m) {
       if (rooms.size >= MAX_ROOMS) {
         return sendTo({ ws }, { t: 'error', error: 'Server is full right now — try again soon.' });
       }
-      const room = newRoom(ws, cleanName(m.name), m.target);
+      const room = newRoom(ws, cleanName(m.name), m.target, m.seats, cleanPid(m.pid));
       ws.room = room;
       ws.playerIndex = 0;
       sendTo(room.players[0], { t: 'created', code: room.code, token: room.players[0].token });
@@ -228,17 +251,33 @@ function handleMessage(ws, m) {
       const code = String(m.code || '').toUpperCase().trim();
       const room = rooms.get(code);
       if (!room) return sendTo({ ws }, { t: 'error', error: `No room with code ${code || '—'}.` });
-      if (room.players.length >= 2) {
+      if (room.state || room.players.length >= room.size) {
         return sendTo({ ws }, { t: 'error', error: 'That room is already full.' });
       }
       room.players.push({
         ws,
         name: cleanName(m.name),
+        pid: cleanPid(m.pid),
         token: crypto.randomBytes(12).toString('hex'),
         connected: true,
       });
       ws.room = room;
-      ws.playerIndex = 1;
+      ws.playerIndex = room.players.length - 1;
+
+      if (room.players.length < room.size) {
+        // still waiting for seats — everyone sees the fill count
+        room.players.forEach((p) => {
+          sendTo(p, {
+            t: 'lobby',
+            code: room.code,
+            token: p.token,
+            joined: room.players.length,
+            size: room.size,
+          });
+        });
+        break;
+      }
+
       room.state = Engine.newGame(room.players.map((p) => p.name), { target: room.target });
       const first = room.players[room.state.turn].name;
       room.players.forEach((p, i) => {
@@ -271,8 +310,9 @@ function handleMessage(ws, m) {
       ws.playerIndex = idx;
       sendTo(player, { t: 'start', code: room.code, token: player.token, view: Engine.view(room.state, idx) });
       sendTo(player, { t: 'state', view: Engine.view(room.state, idx), msg: 'Reconnected.' });
-      const otherP = room.players[1 - idx];
-      if (otherP) sendTo(otherP, { t: 'opp_back', msg: `${player.name} is back.` });
+      for (const otherP of othersOf(room, idx)) {
+        sendTo(otherP, { t: 'opp_back', msg: `${player.name} is back.` });
+      }
       break;
     }
 
@@ -297,6 +337,14 @@ function handleMessage(ws, m) {
         won: !!res.won,
         cleared: res.cleared ? res.cleared.length : 0,
       });
+      if (res.won) {
+        const seats = room.players.map((p) => ({ pid: p.pid, name: p.name }));
+        const mode = String(room.size);
+        Stats.recordHand(seats, mode, room.state.winner, res.penalties || []);
+        if (room.state.matchOver) {
+          Stats.recordMatch(seats, mode, room.state.matchRanking);
+        }
+      }
       // rooms linger between hands; only a finished match starts the clock
       room.doneAt = room.state.matchOver ? Date.now() : null;
       break;
@@ -305,12 +353,13 @@ function handleMessage(ws, m) {
     case 'leave': {
       const room = ws.room;
       if (!room || ws.playerIndex == null) return;
-      const otherP = room.players[1 - ws.playerIndex];
-      if (otherP && room.state && !room.state.over) {
-        sendTo(otherP, {
-          t: 'opp_left',
-          msg: `${room.players[ws.playerIndex].name} left the game.`,
-        });
+      if (room.state && !room.state.over) {
+        for (const otherP of othersOf(room, ws.playerIndex)) {
+          sendTo(otherP, {
+            t: 'opp_left',
+            msg: `${room.players[ws.playerIndex].name} left the game.`,
+          });
+        }
       }
       rooms.delete(room.code);
       ws.room = null;

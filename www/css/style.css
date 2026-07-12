@@ -748,3 +748,118 @@ h2 {
 #cleared .pile-label {
   opacity: 0.6;
 }
+
+/* multiple opponents */
+
+#opps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.opp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 6px 4px;
+  border: 2px solid transparent;
+}
+
+.opp.active {
+  border-color: var(--gb-lightest);
+}
+
+#me-bar.active > .player-chip .p-name {
+  text-decoration: underline;
+}
+
+.opp .opp-hand {
+  display: flex;
+  padding: 0 2px;
+  min-height: calc(var(--card-h-sm) * 0.45);
+}
+
+.opp .opp-hand .card {
+  margin-right: calc(var(--card-w-sm) * -0.78);
+  height: calc(var(--card-h-sm) * 0.45);
+}
+
+.opp .opp-hand .card:last-child {
+  margin-right: 0;
+}
+
+/* ranked stats */
+
+.stats-panel {
+  max-height: 92dvh;
+  overflow-y: auto;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.stat-tile {
+  border: 2px solid var(--gb-light);
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+
+.stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.stat-sub {
+  font-size: 0.62rem;
+  opacity: 0.7;
+}
+
+.lb-title {
+  margin-top: 14px;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+}
+
+#lb-table {
+  margin: 8px 0 14px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+}
+
+.lb-row {
+  display: grid;
+  grid-template-columns: 2ch 1fr 5ch 6ch;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 2px solid var(--gb-dark);
+  background: rgba(15, 56, 15, 0.35);
+  font-size: 0.82rem;
+}
+
+.lb-row:first-child {
+  border-color: var(--gb-lightest);
+}
+
+.lb-rating {
+  text-align: right;
+  font-weight: 700;
+}
+
+.lb-record {
+  text-align: right;
+  opacity: 0.8;
+}

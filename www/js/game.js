@@ -332,24 +332,38 @@
       return;
     }
     const me = vm.players[vm.you];
-    const opp = vm.players[1 - vm.you];
 
     // prune stale selections
     const handIds = new Set(vm.hand.map((c) => c.id));
     for (const id of [...view.selected]) if (!handIds.has(id)) view.selected.delete(id);
 
-    // opponent bar
-    $('opp-name').textContent = opp.name;
-    $('opp-score').textContent = `${vm.scores[1 - vm.you]}/${vm.target}`;
+    // opponents bar: one block per other seat, in turn order after you
     $('me-score').textContent = `${vm.scores[vm.you]}/${vm.target}`;
-    $('opp-count').textContent = `${opp.handCount} cards`;
-    $('opp-opened').textContent = opp.opened ? 'opened' : 'not opened';
-    $('opp-opened').classList.toggle('on', opp.opened);
-    const oppHand = $('opp-hand');
-    oppHand.innerHTML = '';
-    for (let i = 0; i < opp.handCount; i++) {
-      oppHand.appendChild(cardEl(null, { faceDown: true, small: true }));
+    const oppsBox = $('opps');
+    oppsBox.innerHTML = '';
+    for (let k = 1; k < vm.players.length; k++) {
+      const i = (vm.you + k) % vm.players.length;
+      const o = vm.players[i];
+      const block = document.createElement('div');
+      block.className = 'opp' + (vm.turn === i && !vm.over ? ' active' : '');
+      const chip = document.createElement('div');
+      chip.className = 'player-chip';
+      chip.innerHTML =
+        `<span class="p-name"></span>` +
+        `<span class="p-score">${vm.scores[i]}/${vm.target}</span>` +
+        `<span class="p-count">${o.handCount} cards</span>` +
+        `<span class="p-open${o.opened ? ' on' : ''}">${o.opened ? 'opened' : 'not opened'}</span>`;
+      chip.querySelector('.p-name').textContent = o.name;
+      block.appendChild(chip);
+      const mini = document.createElement('div');
+      mini.className = 'opp-hand';
+      for (let n = 0; n < o.handCount; n++) {
+        mini.appendChild(cardEl(null, { faceDown: true, small: true }));
+      }
+      block.appendChild(mini);
+      oppsBox.appendChild(block);
     }
+    $('me-bar').classList.toggle('active', vm.turn === vm.you && !vm.over);
 
     // table melds
     const meldsBox = $('melds');
@@ -434,7 +448,7 @@
           : 'Play melds, attach cards, then discard one card to end your turn.';
     }
     if (!hint && !myTurn && MODE === 'net' && !vm.over) {
-      hint = `Waiting for ${opp.name}…`;
+      hint = `Waiting for ${vm.players[vm.turn].name}…`;
     }
     $('msgbar').textContent = hint;
     $('stock').classList.toggle('clickable', myTurn && vm.phase === 'draw');
@@ -662,26 +676,28 @@
       return;
     }
     const w = vm.players[vm.winner];
-    const l = vm.players[1 - vm.winner];
-    const penalty =
-      vm.lastPenalty != null
-        ? vm.lastPenalty
-        : (vm.loserHand || []).reduce((s, c) => s + R.handPenalty(c), 0);
+    const takes = (vm.lastPenalties || [])
+      .map((pen, i) => (i === vm.winner ? null : `${vm.players[i].name} +${pen}`))
+      .filter(Boolean)
+      .join(' · ');
     if (vm.matchOver) {
+      const standings = (vm.matchRanking || [])
+        .map((i, place) => `${place + 1}. ${vm.players[i].name} (${vm.scores[i]})`)
+        .join('  ');
       $('end-title').textContent = `★ ${vm.players[vm.matchWinner].name} wins the match! ★`;
-      $('end-detail').textContent =
-        `${l.name} takes ${penalty} point${penalty === 1 ? '' : 's'} and busts past ${vm.target}.`;
+      $('end-detail').textContent = standings;
     } else {
       $('end-title').textContent = `★ ${w.name} wins hand ${vm.handNumber}! ★`;
-      $('end-detail').textContent =
-        `${l.name} takes ${penalty} penalty point${penalty === 1 ? '' : 's'}.`;
+      $('end-detail').textContent = takes;
     }
     $('end-scores').textContent =
-      `${vm.players[0].name} ${vm.scores[0]} · ${vm.players[1].name} ${vm.scores[1]}` +
+      vm.players.map((pl, i) => `${pl.name} ${vm.scores[i]}`).join(' · ') +
       ` — reach ${vm.target} and you lose the match`;
     const box = $('end-cards');
     box.innerHTML = '';
-    for (const c of vm.loserHand || []) box.appendChild(cardEl(c, { small: true }));
+    if (vm.players.length === 2 && vm.loserHands) {
+      for (const c of vm.loserHands.find(Boolean) || []) box.appendChild(cardEl(c, { small: true }));
+    }
     $('btn-next').classList.toggle('hidden', vm.matchOver);
     $('btn-again').textContent = vm.matchOver ? 'Back to menu' : 'Quit match';
     snd(vm.winner === vm.you ? 'win' : 'lose');
@@ -692,8 +708,29 @@
   /* ================= game start ================= */
 
   function chosenTarget() {
-    const btn = document.querySelector('.target-btn.active');
+    const btn = document.querySelector('.target-btn.active[data-target]');
     return btn ? Number(btn.dataset.target) : 151;
+  }
+
+  function chosenSeats() {
+    const btn = document.querySelector('.seats-btn.active');
+    return btn ? Number(btn.dataset.seats) : 2;
+  }
+
+  // Persistent anonymous player id — ties ranked results to this device.
+  function getPid() {
+    try {
+      let pid = localStorage.getItem('scala40.pid');
+      if (!pid) {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        pid = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+        localStorage.setItem('scala40.pid', pid);
+      }
+      return pid;
+    } catch {
+      return null;
+    }
   }
 
   function startLocalGame() {
@@ -701,8 +738,14 @@
     MODE = 'local';
     LOCAL = { mode };
     const n1 = $('name1').value.trim() || 'Player 1';
-    const n2 = mode === 'pvc' ? 'Computer' : $('name2').value.trim() || 'Player 2';
-    S = E.newGame([n1, n2], { target: chosenTarget() });
+    let names;
+    if (mode === 'pvc') {
+      names = [n1, 'Computer'];
+    } else {
+      names = [n1, $('name2').value.trim() || 'Player 2'];
+      for (let i = 3; i <= chosenSeats(); i++) names.push(`Player ${i}`);
+    }
+    S = E.newGame(names, { target: chosenTarget() });
     view.selected.clear();
     setMsg('');
     snd('deal');
@@ -728,9 +771,11 @@
   function startOnlineCreate() {
     const name = $('name1').value.trim() || 'Player 1';
     const target = chosenTarget();
-    window.NET.create(name, target);
+    const seats = chosenSeats();
+    window.NET.create(name, target, seats, getPid());
     $('room-code-echo').textContent = '…';
-    $('wait-target').textContent = `Match to ${target}.`;
+    $('wait-target').textContent = `${seats}-player match to ${target}.`;
+    $('wait-count').textContent = '';
     show('wait-screen');
   }
 
@@ -741,13 +786,18 @@
       $('online-msg').textContent = 'Enter the room code you were given.';
       return;
     }
-    window.NET.join(code, name);
+    window.NET.join(code, name, getPid());
   }
 
   function wireNet() {
     const NET = window.NET;
     NET.onCreated = (code) => {
       $('room-code-echo').textContent = code;
+    };
+    NET.onLobby = (joined, size, code) => {
+      $('room-code-echo').textContent = code;
+      $('wait-count').textContent = `${joined}/${size} players in.`;
+      show('wait-screen');
     };
     NET.onStart = () => {
       MODE = 'net';
@@ -787,6 +837,76 @@
     };
   }
 
+  /* ================= ranked stats screen ================= */
+
+  let statsMode = '2';
+
+  function statTile(label, value, sub) {
+    const d = document.createElement('div');
+    d.className = 'stat-tile';
+    d.innerHTML = `<span class="stat-label"></span><span class="stat-value"></span><span class="stat-sub"></span>`;
+    d.children[0].textContent = label;
+    d.children[1].textContent = value;
+    d.children[2].textContent = sub || '';
+    return d;
+  }
+
+  async function renderStatsScreen() {
+    const my = $('my-stats');
+    const lb = $('lb-table');
+    my.innerHTML = '<p class="online-msg">Loading…</p>';
+    lb.innerHTML = '';
+    try {
+      const [mine, board] = await Promise.all([
+        fetch(`/api/stats?pid=${getPid()}`).then((r) => r.json()),
+        fetch(`/api/leaderboard?mode=${statsMode}`).then((r) => r.json()),
+      ]);
+      my.innerHTML = '';
+      const m = (mine.modes || {})[statsMode];
+      if (!m || !m.games) {
+        const p = document.createElement('p');
+        p.className = 'online-msg';
+        p.textContent = 'No ranked games in this mode yet — finish an online match to get on the board.';
+        my.appendChild(p);
+      } else {
+        const losses = m.games - m.wins;
+        const pct = Math.round((100 * m.wins) / m.games);
+        const streak = m.streak > 0 ? `W${m.streak}` : m.streak < 0 ? `L${-m.streak}` : '—';
+        const handsLost = m.handsPlayed - m.handsWon;
+        const avg = handsLost > 0 ? Math.round(m.pointsTaken / handsLost) : 0;
+        const grid = document.createElement('div');
+        grid.className = 'stat-grid';
+        grid.appendChild(statTile('Rating', m.rating));
+        grid.appendChild(statTile('Record', `${m.wins}-${losses}`, `${pct}% wins`));
+        grid.appendChild(statTile('Streak', streak, `best W${m.bestStreak}`));
+        grid.appendChild(statTile('Matches', m.games));
+        grid.appendChild(statTile('Hands', `${m.handsWon}/${m.handsPlayed}`, 'won/played'));
+        grid.appendChild(statTile('Avg taken', avg, 'pts/lost hand'));
+        my.appendChild(grid);
+      }
+      if (!board.length) {
+        const p = document.createElement('p');
+        p.className = 'online-msg';
+        p.textContent = 'Nobody on this ladder yet.';
+        lb.appendChild(p);
+      }
+      board.forEach((e, i) => {
+        const row = document.createElement('div');
+        row.className = 'lb-row';
+        row.innerHTML = `<span class="lb-rank">${i + 1}</span><span class="lb-name"></span><span class="lb-rating">${e.rating}</span><span class="lb-record">${e.wins}/${e.games}</span>`;
+        row.querySelector('.lb-name').textContent = e.name;
+        lb.appendChild(row);
+      });
+    } catch {
+      my.innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'online-msg';
+      p.textContent =
+        'The ranked ladder lives on the game server — open the app from your hosted server to see it.';
+      my.appendChild(p);
+    }
+  }
+
   /* ================= wiring ================= */
 
   function init() {
@@ -798,12 +918,19 @@
         $('name2').classList.toggle('hidden', b.id !== 'btn-pvp');
         $('online-row').classList.toggle('hidden', !online);
         $('btn-start').classList.toggle('hidden', online);
+        $('seats-row').classList.toggle('hidden', b.id === 'btn-pvc');
       });
     }
-    const targetBtns = [...document.querySelectorAll('.target-btn')];
+    const targetBtns = [...document.querySelectorAll('.target-btn[data-target]')];
     for (const b of targetBtns) {
       b.addEventListener('click', () => {
         targetBtns.forEach((x) => x.classList.toggle('active', x === b));
+      });
+    }
+    const seatBtns = [...document.querySelectorAll('.seats-btn')];
+    for (const b of seatBtns) {
+      b.addEventListener('click', () => {
+        seatBtns.forEach((x) => x.classList.toggle('active', x === b));
       });
     }
     if (!netAvailable()) {
@@ -872,6 +999,21 @@
       S = null;
       show('menu-screen');
     });
+
+    $('btn-stats').addEventListener('click', () => {
+      show('stats-screen');
+      renderStatsScreen();
+    });
+    $('btn-stats-back').addEventListener('click', () => show('menu-screen'));
+    for (const b of document.querySelectorAll('#stats-tabs .mode-btn')) {
+      b.addEventListener('click', () => {
+        document
+          .querySelectorAll('#stats-tabs .mode-btn')
+          .forEach((x) => x.classList.toggle('active', x === b));
+        statsMode = b.dataset.mode;
+        renderStatsScreen();
+      });
+    }
 
     wireNet();
 

@@ -1,9 +1,11 @@
 # Scala 40 (Scala Quaranta)
 
 A complete, mobile-first implementation of **Scala 40** — the classic
-Italian 40-point rummy — styled like a Game Boy LCD. Three modes:
-**vs computer**, **pass-and-play**, and **online multiplayer** with
-5-letter room codes. Match play to 101/151/201 penalty points.
+Italian 40-point rummy — styled like a Game Boy LCD, with synthesized
+sound effects. Modes: **vs computer**, **pass-and-play**, and **online
+multiplayer** with 5-letter room codes — **1v1, 3, or 4 players**.
+Match play to 101/151/201 penalty points, and online matches feed a
+**ranked ladder** (per-mode Elo, detailed stat board, leaderboards).
 
 The game is dependency-free HTML/CSS/JS packaged three ways from one
 codebase:
@@ -39,8 +41,11 @@ the proper icon and works offline for the local modes.
   (enforced; you can also undo the pickup).
 - After opening you can attach single cards to any meld on the table and
   swap a table joker for the real card it stands for.
-- Discard your last card to win the hand. The loser counts penalty points
-  for the cards left in hand (joker 25, ace 11, faces 10, rest face value).
+- Discard your last card to win the hand. Losers count the cards left in
+  hand (joker 25, ace 11, faces 10, rest face value) — or take a flat
+  **100** if they never opened.
+- A finished jokerless meld (all four suits, or a full A-K run) is swept
+  off the board into a face-down cleared pile, keeping the table tidy.
 - **Match play:** penalties accumulate hand after hand; reaching the match
   limit — **101 / 151 (default) / 201**, picked in the menu — loses the
   match. In online rooms the creator's choice applies. The lead alternates
@@ -50,6 +55,15 @@ the proper icon and works offline for the local modes.
 
 Casual simplification: a retrieved joker may be kept in hand (strict rules
 require replaying it the same turn).
+
+## Ranked play
+
+Every finished online match counts toward a per-mode ladder (1v1 / 3P /
+4P): pairwise Elo by final placement, match wins, streaks, hands won and
+average penalty taken. Identity is an anonymous per-device id, stats
+persist in `server/stats.json`, and the app's **Ranked stats** screen
+reads them from `/api/stats` and `/api/leaderboard`. Results are recorded
+by the server referee itself, so clients can't fake them.
 
 ## How multiplayer stays fair
 

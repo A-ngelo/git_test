@@ -50,9 +50,10 @@
       target: opts.target != null ? opts.target : 151,
       handNumber: 1,
       handFirstTurn: firstTurn,
-      lastPenalty: null,
+      lastPenalties: null,
       matchOver: false,
       matchWinner: null,
+      matchRanking: null,
     };
   }
 
@@ -74,7 +75,7 @@
     S.melds = [];
     S.meldSeq = 1;
     S.handNumber++;
-    S.handFirstTurn = 1 - S.handFirstTurn;
+    S.handFirstTurn = (S.handFirstTurn + 1) % S.players.length;
     S.turn = S.handFirstTurn;
     S.phase = 'draw';
     S.picked = null;
@@ -85,7 +86,7 @@
     S.over = false;
     S.winner = null;
     S.cleared = [];
-    S.lastPenalty = null;
+    S.lastPenalties = null;
     return ok({ handNumber: S.handNumber });
   }
 
@@ -282,19 +283,28 @@
     if (player.hand.length === 0) {
       S.over = true;
       S.winner = p;
-      const loser = 1 - p;
-      const penalty = S.players[loser].hand.reduce((s, c) => s + R.handPenalty(c), 0);
-      S.scores[loser] += penalty;
-      S.lastPenalty = penalty;
-      if (S.scores[loser] >= S.target) {
+      // A player who never opened takes a flat 100; everyone else counts
+      // the cards left in hand.
+      const penalties = S.players.map((pl, i) =>
+        i === p ? 0 : pl.opened ? pl.hand.reduce((sum, c) => sum + R.handPenalty(c), 0) : 100
+      );
+      penalties.forEach((pen, i) => {
+        S.scores[i] += pen;
+      });
+      S.lastPenalties = penalties;
+      if (S.scores.some((sc) => sc >= S.target)) {
         S.matchOver = true;
-        S.matchWinner = p;
+        // final ranking: lowest score wins; the hand winner takes ties
+        S.matchRanking = S.players
+          .map((_, i) => i)
+          .sort((a, b) => S.scores[a] - S.scores[b] || (a === p ? -1 : b === p ? 1 : 0));
+        S.matchWinner = S.matchRanking[0];
       }
-      return ok({ card, openedNow, cleared, won: true, penalty });
+      return ok({ card, openedNow, cleared, won: true, penalties });
     }
 
     // next turn
-    S.turn = 1 - S.turn;
+    S.turn = (S.turn + 1) % S.players.length;
     S.phase = 'draw';
     S.picked = null;
     S.mustStock = false;
@@ -329,13 +339,18 @@
       clearedCount: S.cleared.reduce((n, m) => n + m.slots.length, 0),
       over: S.over,
       winner: S.winner,
-      loserHand: S.over && S.winner != null ? S.players[1 - S.winner].hand : null,
+      // at hand end everyone's remaining cards are public information
+      loserHands:
+        S.over && S.winner != null
+          ? S.players.map((pl, i) => (i === S.winner ? null : pl.hand))
+          : null,
+      lastPenalties: S.lastPenalties,
       scores: S.scores.slice(),
       target: S.target,
       handNumber: S.handNumber,
-      lastPenalty: S.lastPenalty,
       matchOver: S.matchOver,
       matchWinner: S.matchWinner,
+      matchRanking: S.matchRanking,
     };
   }
 
