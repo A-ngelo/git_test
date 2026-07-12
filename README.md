@@ -163,9 +163,26 @@ Wiring it up for release:
 Everything above is config — the purchase flow, entitlement check,
 banner placement, and interstitial cadence are already implemented.
 
+## The computer opponent
+
+Three difficulties (menu, vs CPU): **Easy** never reads the discard pile,
+hesitates, and misses attachments; **Medium** plays a solid club game
+(backtracking 40+ opening solver, table-aware discards); **Hard** adds an
+opponent model built from what you take and shed (it won't feed your
+melds), endgame danger awareness (dumps expensive cards when you're about
+to close), and it reclaims table jokers it holds the real card for.
+`npm test` includes a self-play audit that fuzz-checks engine invariants
+across thousands of actions and verifies the ladder actually orders
+(typical series: hard beats easy ~95%, medium beats easy ~90%, hard beats
+medium ~60%).
+
+Two edge rules found by that audit are now in the engine: a hand with no
+drawable card, or one where the stock has been re-shuffled four times
+without anyone closing, is declared a **dead hand** — no winner, everyone
+counts (flat 100 unopened), and the match rolls on.
+
 ## Roadmap ideas
 
-- Difficulty levels for the AI (defensive discards tracking opponent pickups)
 - Random matchmaking and rematches for online rooms
 - Sound effects, haptics, animations
 - Selectable palettes (original DMG green, gray "Pocket", inverted)

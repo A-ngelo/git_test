@@ -35,6 +35,7 @@
       melds: [],
       meldSeq: 1,
       turn: firstTurn,
+      recycleCount: 0,      // stock re-shuffles this hand (dead at 5th)
       phase: 'draw',        // 'draw' -> 'play'
       picked: null,         // id of card taken from the discard pile this turn
       mustStock: false,     // set after undoing a pickup
@@ -75,6 +76,7 @@
     S.melds = [];
     S.meldSeq = 1;
     S.handNumber++;
+    S.recycleCount = 0;
     S.handFirstTurn = (S.handFirstTurn + 1) % S.players.length;
     S.turn = S.handFirstTurn;
     S.phase = 'draw';
@@ -130,11 +132,14 @@
     player.hand = player.hand.filter((c) => !idSet.has(c.id));
   }
 
+  const MAX_RECYCLES = 4;
+
   function recycleStockIfNeeded(S) {
     if (S.stock.length > 0) return;
     const top = S.discard.pop();
     S.stock = R.shuffle(S.discard);
     S.discard = top ? [top] : [];
+    S.recycleCount = (S.recycleCount || 0) + 1;
   }
 
   /* ---------- actions: each returns { ok } or { ok:false, error } ---------- */
@@ -143,7 +148,29 @@
     const g = guard(S, p, 'draw');
     if (g) return err(g);
     recycleStockIfNeeded(S);
-    if (S.stock.length === 0) return err('No cards left to draw.');
+    if (S.stock.length === 0 || S.recycleCount > MAX_RECYCLES) {
+      // Dead hand: either nobody can draw at all, or the stock has gone
+      // around too many times without anyone closing (cards locked in
+      // cleared melds can make some hands unwinnable). No winner —
+      // everyone counts (flat 100 if they never opened), match rolls on.
+      S.over = true;
+      S.winner = null;
+      const penalties = S.players.map((pl) =>
+        pl.opened ? pl.hand.reduce((sum, c) => sum + R.handPenalty(c), 0) : 100
+      );
+      penalties.forEach((pen, i) => {
+        S.scores[i] += pen;
+      });
+      S.lastPenalties = penalties;
+      if (S.scores.some((sc) => sc >= S.target)) {
+        S.matchOver = true;
+        S.matchRanking = S.players
+          .map((_, i) => i)
+          .sort((a, b) => S.scores[a] - S.scores[b] || a - b);
+        S.matchWinner = S.matchRanking[0];
+      }
+      return ok({ stalemate: true, penalties });
+    }
     const card = S.stock.pop();
     S.players[p].hand.push(card);
     S.lastDraw = { p, id: card.id };

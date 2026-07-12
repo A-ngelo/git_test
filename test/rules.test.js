@@ -272,4 +272,56 @@ t('AI takes the discard only when it is usable', () => {
   assert.strictEqual(AI.chooseDraw(stateNo, player), 'stock');
 });
 
+/* ---- difficulty levels ---- */
+t('easy never takes the discard; medium takes a usable one', () => {
+  const player = { opened: true, hand: [c(5, '♥'), c(6, '♥'), c(9, '♣')] };
+  const state = { melds: [], discard: [c(7, '♥')] }; // completes 5-6-7♥
+  assert.strictEqual(AI.chooseDraw(state, player, { level: 'easy' }), 'stock');
+  assert.strictEqual(AI.chooseDraw(state, player, { level: 'medium' }), 'discard');
+});
+
+t('hard refuses to feed cards the opponent has been collecting', () => {
+  // 9♦ and 2♣ are both dead weight; the opponent took a 9 earlier
+  const hand = [c(9, '♦'), c(2, '♣'), c(5, '♥'), c(6, '♥')];
+  const memory = { oppPicks: [c(9, '♠')], oppDiscards: [] };
+  const safe = AI.chooseDiscard(hand, [], { level: 'hard', memory });
+  assert.strictEqual(safe.rank, 2, `fed the opponent: ${R.cardLabel(safe)}`);
+  // without the model, the expensive 9 goes first
+  const naive = AI.chooseDiscard(hand, [], { level: 'medium' });
+  assert.strictEqual(naive.rank, 9);
+});
+
+t('hard dumps expensive pairs when the opponent is about to close', () => {
+  const hand = [c(13, '♠'), c(13, '♥'), c(2, '♦')];
+  const calm = AI.chooseDiscard(hand, [], { level: 'hard', danger: false });
+  assert.strictEqual(calm.rank, 2); // keep the king pair while safe
+  const scared = AI.chooseDiscard(hand, [], { level: 'hard', danger: true });
+  assert.strictEqual(scared.rank, 13); // shed 10 points before being caught
+});
+
+t('hard reclaims a table joker it can replace', () => {
+  const run = R.validateMeld([c(5, '♦'), c(6, '♦'), c(8, '♦'), joker()]); // joker = 7♦
+  run.id = 42;
+  const state = { melds: [run], discard: [] };
+  const player = {
+    opened: true,
+    hand: [c(7, '♦'), c(2, '♠'), c(9, '♥'), c(12, '♣')],
+  };
+  const plan = AI.planPlay(state, player, null, { level: 'hard', minOppHand: 9 });
+  assert.strictEqual(plan[0].type, 'replaceJoker');
+  assert.strictEqual(plan[0].meldId, 42);
+  // but not in the endgame, where pocketing 25 points is a liability
+  const late = AI.planPlay(state, player, null, { level: 'hard', minOppHand: 2 });
+  assert(late.every((a) => a.type !== 'replaceJoker'));
+});
+
+t('medium never plans a joker reclaim', () => {
+  const run = R.validateMeld([c(5, '♦'), c(6, '♦'), c(8, '♦'), joker()]);
+  run.id = 7;
+  const state = { melds: [run], discard: [] };
+  const player = { opened: true, hand: [c(7, '♦'), c(2, '♠')] };
+  const plan = AI.planPlay(state, player, null, { level: 'medium' });
+  assert(plan.every((a) => a.type !== 'replaceJoker'));
+});
+
 console.log(`\n${n} tests run`);

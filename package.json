@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "start": "node server/server.js",
-    "test": "node test/rules.test.js && node test/engine.test.js && node test/stats.test.js",
+    "test": "node test/rules.test.js && node test/engine.test.js && node test/stats.test.js && node test/selfplay.test.js 12",
     "ios": "npx cap add ios && npx cap sync ios && npx cap open ios",
     "android": "npx cap add android && npx cap sync android && npx cap open android",
     "assets": "npx @capacitor/assets generate --iconBackgroundColor '#0f380f' --splashBackgroundColor '#0f380f'"

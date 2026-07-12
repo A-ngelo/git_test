@@ -1,9 +1,18 @@
 /*
- * Scala 40 — computer opponent.
- * Finds melds in a hand, searches for the best disjoint combination
- * (used both to open with 40+ points and to dump cards afterwards),
- * decides where to draw from and what to discard.
- * Pure logic, no DOM.
+ * Scala 40 — computer opponent with three difficulty levels.
+ *
+ *   easy    Casual: never reads the discard pile, hesitates to lay melds,
+ *           misses attachments, and its discards ignore the table.
+ *   medium  Solid club player: backtracking 40+ opening solver, takes the
+ *           discard only when immediately usable, attaches everything,
+ *           table-aware discards, never lets a joker go.
+ *   hard    Everything medium does, plus: an opponent model built from
+ *           what you take and shed (never feeds your melds), endgame
+ *           danger awareness (dumps expensive cards when someone is about
+ *           to close), and it reclaims table jokers it can replace.
+ *
+ * Pure logic, no DOM. Callers pass opts = { level, memory, minOppHand }
+ * where memory = { oppPicks: [cards], oppDiscards: [cards] }.
  */
 (function (global) {
   'use strict';
@@ -29,7 +38,8 @@
     return out;
   }
 
-  /* Enumerate every candidate meld that can be formed from a hand. */
+  /* ---------- meld discovery (all levels) ---------- */
+
   function generateMelds(hand) {
     const melds = [];
     const jokers = hand.filter((c) => c.joker);
@@ -125,9 +135,78 @@
     return best;
   }
 
-  /* Where should the AI draw from? 'discard' only when the top card is
-   * immediately usable (that is the rule for taking it). */
-  function chooseDraw(state, player) {
+  /* ---------- opponent model (hard) ----------
+   * Positive = the opponent probably collects cards like this one,
+   * negative = they shed cards like it, so it is a safer discard. */
+  function feedRisk(card, memory) {
+    if (!memory || card.joker) return 0;
+    let risk = 0;
+    for (const p of memory.oppPicks || []) {
+      if (p.joker) continue;
+      if (p.rank === card.rank) risk += 2;
+      if (p.suit === card.suit && Math.abs(p.rank - card.rank) <= 2) risk += 2;
+    }
+    for (const d of memory.oppDiscards || []) {
+      if (d.joker) continue;
+      if (d.rank === card.rank) risk -= 1;
+      if (d.suit === card.suit && Math.abs(d.rank - card.rank) <= 1) risk -= 1;
+    }
+    return risk;
+  }
+
+  /* ---------- decisions ---------- */
+
+  function usefulness(card, hand) {
+    if (card.joker) return 100;
+    let u = 0;
+    for (const o of hand) {
+      if (o === card || o.joker) continue;
+      if (o.rank === card.rank && o.suit !== card.suit) u += 2;
+      if (o.suit === card.suit) {
+        const d = Math.abs(o.rank - card.rank);
+        if (d === 1) u += 2;
+        else if (d === 2) u += 1;
+        if ((card.rank === 1 && o.rank === 13) || (card.rank === 13 && o.rank === 1)) u += 2;
+      }
+    }
+    // a joker in hand turns any partial combination into a real meld
+    if (u > 0 && hand.some((o) => o !== card && o.joker)) u += 1;
+    return u;
+  }
+
+  function chooseDiscard(hand, tableMelds, opts) {
+    opts = opts || {};
+    const level = opts.level || 'medium';
+    tableMelds = tableMelds || [];
+    const scored = [];
+    for (const c of hand) {
+      if (c.joker) continue; // a joker goes only when it is the last card
+      let score;
+      if (level === 'hard' && opts.danger) {
+        // someone is about to close: shed points, keep only cheap hopes
+        score = usefulness(c, hand) * 30 - R.handPenalty(c) * 12;
+      } else {
+        score = usefulness(c, hand) * 100 - R.handPenalty(c);
+      }
+      if (level !== 'easy' && tableMelds.some((m) => R.canAttach(m, c))) score += 900;
+      if (level === 'hard') {
+        const risk = feedRisk(c, opts.memory);
+        score += risk > 0 ? risk * 220 : risk * 40;
+      }
+      scored.push({ c, score });
+    }
+    if (!scored.length) return hand[0];
+    scored.sort((a, b) => a.score - b.score);
+    // easy players are inconsistent about which junk card goes
+    if (level === 'easy' && scored.length > 1 && Math.random() < 0.5) return scored[1].c;
+    return scored[0].c;
+  }
+
+  /* Where to draw from. 'discard' only when the top card is usable now —
+   * that is the rule for taking it. Easy never even looks. */
+  function chooseDraw(state, player, opts) {
+    opts = opts || {};
+    if ((opts.level || 'medium') === 'easy') return 'stock';
     const top = state.discard[state.discard.length - 1];
     if (!top) return 'stock';
     if (player.opened) {
@@ -146,78 +225,67 @@
     return 'stock';
   }
 
-  function usefulness(card, hand) {
-    if (card.joker) return 100;
-    let u = 0;
-    for (const o of hand) {
-      if (o === card || o.joker) continue;
-      if (o.rank === card.rank && o.suit !== card.suit) u += 2;
-      if (o.suit === card.suit) {
-        const d = Math.abs(o.rank - card.rank);
-        if (d === 1) u += 2;
-        else if (d === 2) u += 1;
-        // Ace works next to the King too.
-        if ((card.rank === 1 && o.rank === 13) || (card.rank === 13 && o.rank === 1)) u += 2;
-      }
-    }
-    // a joker in hand turns any partial combination into a real meld
-    if (u > 0 && hand.some((o) => o !== card && o.joker)) u += 1;
-    return u;
-  }
-
-  /* Pick the least valuable discard, table-aware:
-   * - never let go of a joker while there is any other choice
-   * - hold cards that attach to melds on the table (we can dump them the
-   *   moment we're opened — and discarding them gifts the opponent a
-   *   free pickup)
-   * - hold cards that pair up or sit near a run in hand
-   * - among equally useless cards, shed the highest penalty points */
-  function chooseDiscard(hand, tableMelds) {
-    tableMelds = tableMelds || [];
-    let pick = hand[0];
-    let pickScore = Infinity;
-    for (const c of hand) {
-      if (c.joker) continue;
-      let score = usefulness(c, hand) * 100 - R.handPenalty(c);
-      if (tableMelds.some((m) => R.canAttach(m, c))) score += 900;
-      if (score < pickScore) {
-        pickScore = score;
-        pick = c;
-      }
-    }
-    return pick; // hand[0] survives only if everything else is a joker
-  }
-
   /* Plan a full play phase. Returns an ordered action list:
+   *   { type:'replaceJoker', cardId, meldId }   (hard only)
    *   { type:'meld', cardIds }  { type:'attach', cardId }
    *   { type:'discard', cardId }
    * mustUseId is a card taken from the discard pile that has to leave
    * the hand this turn (melded, attached, or discarded back).
    */
-  function planPlay(state, player, mustUseId) {
+  function planPlay(state, player, mustUseId, opts) {
+    opts = opts || {};
+    const level = opts.level || 'medium';
+    const lazy = level === 'easy';
+    const danger = opts.minOppHand != null && opts.minOppHand <= 3;
     const actions = [];
     let hand = player.hand.slice();
     let opened = player.opened;
-    // Simulate attachments on clones so the real table is untouched.
+    // Simulate on clones so the real table is untouched.
     const table = state.melds.map((m) => ({ ...m, slots: m.slots.map((s) => ({ ...s })) }));
+    const liveTable = () => table.filter((m) => !m.swept);
+
+    // hard: reclaim table jokers it holds the real card for — a joker in
+    // hand is worth far more than the card that frees it. Skipped in the
+    // endgame, where being caught holding 25 points is the bigger risk.
+    if (level === 'hard' && opened && !(opts.minOppHand != null && opts.minOppHand <= 2)) {
+      for (const m of table) {
+        const slot = m.slots.find((sl) => sl.card.joker);
+        if (!slot) continue;
+        const rep = hand.find((c) => R.canReplaceJoker(m, c));
+        if (!rep) continue;
+        actions.push({ type: 'replaceJoker', cardId: rep.id, meldId: m.id });
+        const joker = slot.card;
+        slot.card = rep;
+        hand = hand.filter((c) => c.id !== rep.id);
+        hand.push(joker);
+        // the engine sweeps a now-complete jokerless meld — mirror that
+        const full =
+          (m.type === 'set' && m.slots.length === 4) ||
+          (m.type === 'run' && m.slots.length === 13);
+        if (full && !m.slots.some((sl) => sl.card.joker)) m.swept = true;
+      }
+    }
 
     const layMeld = (m) => {
-      actions.push({ type: 'meld', cardIds: m.slots.map((s) => s.card.id) });
-      const ids = new Set(m.slots.map((s) => s.card.id));
+      actions.push({ type: 'meld', cardIds: m.slots.map((sl) => sl.card.id) });
+      const ids = new Set(m.slots.map((sl) => sl.card.id));
       hand = hand.filter((c) => !ids.has(c.id));
-      table.push({ ...m, slots: m.slots.map((s) => ({ ...s })) });
+      table.push({ ...m, slots: m.slots.map((sl) => ({ ...sl })) });
     };
 
+    const hesitates = lazy && mustUseId == null && Math.random() < 0.35;
     if (!opened) {
-      const combo = bestCombo(generateMelds(hand));
-      let melds = [...combo.melds].sort((a, b) => b.points - a.points);
-      const cardsUsed = () => melds.reduce((n, m) => n + m.slots.length, 0);
-      while (melds.length && hand.length - cardsUsed() < 1) melds.pop();
-      if (melds.reduce((s, m) => s + m.points, 0) >= 40) {
-        melds.forEach(layMeld);
-        opened = true;
+      if (!hesitates) {
+        const combo = bestCombo(generateMelds(hand));
+        let melds = [...combo.melds].sort((a, b) => b.points - a.points);
+        const cardsUsed = () => melds.reduce((n, m) => n + m.slots.length, 0);
+        while (melds.length && hand.length - cardsUsed() < 1) melds.pop();
+        if (melds.reduce((sum, m) => sum + m.points, 0) >= 40) {
+          melds.forEach(layMeld);
+          opened = true;
+        }
       }
-    } else {
+    } else if (!hesitates) {
       const combo = bestCombo(generateMelds(hand));
       for (const m of [...combo.melds].sort((a, b) => b.points - a.points)) {
         if (hand.length - m.slots.length < 1) continue;
@@ -225,13 +293,16 @@
       }
     }
 
-    if (opened) {
+    // Attaching is only legal from the turn AFTER opening — player.opened
+    // at turn start, not the opening we may have just laid above.
+    if (player.opened) {
       let changed = true;
       while (changed) {
         changed = false;
         for (const c of hand.slice()) {
           if (hand.length <= 1) break;
-          const target = table.find((m) => R.canAttach(m, c));
+          if (lazy && Math.random() < 0.5) continue; // easy misses attaches
+          const target = liveTable().find((m) => R.canAttach(m, c));
           if (target) {
             R.applyAttach(target, c);
             actions.push({ type: 'attach', cardId: c.id });
@@ -242,15 +313,16 @@
       }
     }
 
-    // Honour the "use what you took from the discard pile" rule: if the
-    // taken card is still in hand, it must be the discard.
+    // Honour the "use what you took from the discard pile" rule.
     const stuck = mustUseId != null && hand.some((c) => c.id === mustUseId);
-    const discard = stuck ? hand.find((c) => c.id === mustUseId) : chooseDiscard(hand, table);
+    const discard = stuck
+      ? hand.find((c) => c.id === mustUseId)
+      : chooseDiscard(hand, liveTable(), { level, memory: opts.memory, danger });
     actions.push({ type: 'discard', cardId: discard.id });
     return actions;
   }
 
-  const api = { generateMelds, bestCombo, chooseDraw, chooseDiscard, planPlay };
+  const api = { generateMelds, bestCombo, chooseDraw, chooseDiscard, planPlay, feedRisk };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else global.AI = api;

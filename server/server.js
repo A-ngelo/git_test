@@ -138,7 +138,8 @@ function describe(room, p, a, res) {
     res && res.cleared && res.cleared.length
       ? ' A completed meld was cleared off the table.'
       : '';
-  return describeBase(room, p, a, res) + cleared;
+  const dead = res && res.stalemate ? ' The stock is gone — dead hand, everyone counts.' : '';
+  return describeBase(room, p, a, res) + cleared + dead;
 }
 
 function describeBase(room, p, a, res) {
@@ -337,10 +338,10 @@ function handleMessage(ws, m) {
         won: !!res.won,
         cleared: res.cleared ? res.cleared.length : 0,
       });
-      if (res.won) {
+      if (res.won || res.stalemate) {
         const seats = room.players.map((p) => ({ pid: p.pid, name: p.name }));
         const mode = String(room.size);
-        Stats.recordHand(seats, mode, room.state.winner, res.penalties || []);
+        if (res.won) Stats.recordHand(seats, mode, room.state.winner, res.penalties || []);
         if (room.state.matchOver) {
           Stats.recordMatch(seats, mode, room.state.matchRanking);
         }

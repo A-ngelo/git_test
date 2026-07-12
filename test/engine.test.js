@@ -376,6 +376,19 @@ t('a view never leaks the opponent hand or the stock', () => {
   }
 });
 
+t('a dead hand ends with no winner and books everyone', () => {
+  const { S } = riggedGame();
+  S.players[1].hand.push(...S.stock.splice(0)); // drain the stock
+  S.discard = [S.discard[0]]; // single discard card: nothing to recycle
+  const res = E.actions.drawStock(S, 0);
+  assert(res.ok && res.stalemate);
+  assert.strictEqual(S.over, true);
+  assert.strictEqual(S.winner, null);
+  assert.deepStrictEqual(S.scores, [100, 100]); // neither ever opened
+  assert.strictEqual(E.view(S, 0).loserHands, null);
+  assert(E.actions.nextHand(S).ok); // the match continues
+});
+
 t('stock recycles the discard pile when exhausted', () => {
   const { S } = riggedGame();
   // drain the stock into p1's hand (test-only surgery)

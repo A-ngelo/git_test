@@ -209,6 +209,12 @@
       if (res.cleared && res.cleared.length) {
         setMsg('A completed meld was cleared off the table.');
       }
+      // what the human takes and sheds is public info the AI may study
+      if (LOCAL && LOCAL.mode === 'pvc' && res.card) {
+        if (name === 'pickDiscard') LOCAL.aiMemory.oppPicks.push(res.card);
+        if (name === 'discard') LOCAL.aiMemory.oppDiscards.push(res.card);
+        if (name === 'undoPickup') LOCAL.aiMemory.oppPicks.pop();
+      }
     }
     return res;
   }
@@ -237,19 +243,24 @@
     const p = S.players[1];
     setTimeout(() => {
       if (!S || S.over) return;
-      const choice = AI.chooseDraw(S, p);
+      const opts = aiOpts();
+      const choice = AI.chooseDraw(S, p, opts);
       if (choice === 'discard') {
         const res = E.actions.pickDiscard(S, 1);
         setMsg(`Computer takes ${R.cardLabel(res.card)} from the discard pile.`);
       } else {
-        E.actions.drawStock(S, 1);
+        const res = E.actions.drawStock(S, 1);
+        if (res.stalemate) {
+          showEndScreen();
+          return;
+        }
         setMsg('Computer draws from the stock.');
       }
       snd('draw');
       render();
       setTimeout(() => {
         if (!S || S.over) return;
-        const plan = AI.planPlay(S, p, S.picked);
+        const plan = AI.planPlay(S, p, S.picked, opts);
         execAIPlan(plan, 0);
       }, 800);
     }, 800);
@@ -260,7 +271,13 @@
     const p = S.players[1];
     const a = plan[i];
 
-    if (a.type === 'meld') {
+    if (a.type === 'replaceJoker') {
+      const res = E.actions.replaceJoker(S, 1, a.cardId, a.meldId);
+      if (res.ok) {
+        soundForAction('replaceJoker', res);
+        setMsg('Computer swaps the real card in and reclaims the joker!');
+      }
+    } else if (a.type === 'meld') {
       const res = E.actions.layMeld(S, 1, a.cardIds);
       if (res.ok) {
         soundForAction('layMeld', res);
@@ -488,6 +505,10 @@
     }
     const res = actWithSound('drawStock');
     if (!res.async) setMsg(res.ok ? '' : res.error);
+    if (res.stalemate) {
+      showEndScreen();
+      return;
+    }
     render();
   }
 
@@ -675,12 +696,15 @@
       show('end-screen');
       return;
     }
-    const w = vm.players[vm.winner];
+    const w = vm.winner != null ? vm.players[vm.winner] : null;
     const takes = (vm.lastPenalties || [])
       .map((pen, i) => (i === vm.winner ? null : `${vm.players[i].name} +${pen}`))
       .filter(Boolean)
       .join(' · ');
-    if (vm.matchOver) {
+    if (!w && !vm.matchOver) {
+      $('end-title').textContent = 'Dead hand — nobody could draw';
+      $('end-detail').textContent = takes;
+    } else if (vm.matchOver) {
       const standings = (vm.matchRanking || [])
         .map((i, place) => `${place + 1}. ${vm.players[i].name} (${vm.scores[i]})`)
         .join('  ');
@@ -690,6 +714,7 @@
       $('end-title').textContent = `★ ${w.name} wins hand ${vm.handNumber}! ★`;
       $('end-detail').textContent = takes;
     }
+    if (!w) $('end-cards').innerHTML = '';
     $('end-scores').textContent =
       vm.players.map((pl, i) => `${pl.name} ${vm.scores[i]}`).join(' · ') +
       ` — reach ${vm.target} and you lose the match`;
@@ -700,7 +725,7 @@
     }
     $('btn-next').classList.toggle('hidden', vm.matchOver);
     $('btn-again').textContent = vm.matchOver ? 'Back to menu' : 'Quit match';
-    snd(vm.winner === vm.you ? 'win' : 'lose');
+    snd(vm.winner === vm.you || (vm.matchOver && vm.matchWinner === vm.you) ? 'win' : 'lose');
     show('end-screen');
     if (window.Monetize) window.Monetize.onHandEnd();
   }
@@ -710,6 +735,19 @@
   function chosenTarget() {
     const btn = document.querySelector('.target-btn.active[data-target]');
     return btn ? Number(btn.dataset.target) : 151;
+  }
+
+  function chosenDifficulty() {
+    const btn = document.querySelector('.diff-btn.active');
+    return btn ? btn.dataset.diff : 'medium';
+  }
+
+  function aiOpts() {
+    return {
+      level: LOCAL.level || 'medium',
+      memory: LOCAL.aiMemory,
+      minOppHand: S.players[0].hand.length,
+    };
   }
 
   function chosenSeats() {
@@ -736,7 +774,7 @@
   function startLocalGame() {
     const mode = $('btn-pvp').classList.contains('active') ? 'pvp' : 'pvc';
     MODE = 'local';
-    LOCAL = { mode };
+    LOCAL = { mode, level: chosenDifficulty(), aiMemory: { oppPicks: [], oppDiscards: [] } };
     const n1 = $('name1').value.trim() || 'Player 1';
     let names;
     if (mode === 'pvc') {
@@ -919,12 +957,26 @@
         $('online-row').classList.toggle('hidden', !online);
         $('btn-start').classList.toggle('hidden', online);
         $('seats-row').classList.toggle('hidden', b.id === 'btn-pvc');
+        $('diff-row').classList.toggle('hidden', b.id !== 'btn-pvc');
       });
     }
     const targetBtns = [...document.querySelectorAll('.target-btn[data-target]')];
     for (const b of targetBtns) {
       b.addEventListener('click', () => {
         targetBtns.forEach((x) => x.classList.toggle('active', x === b));
+      });
+    }
+    const diffBtns = [...document.querySelectorAll('.diff-btn')];
+    try {
+      const saved = localStorage.getItem('scala40.diff');
+      if (saved) diffBtns.forEach((x) => x.classList.toggle('active', x.dataset.diff === saved));
+    } catch {}
+    for (const b of diffBtns) {
+      b.addEventListener('click', () => {
+        diffBtns.forEach((x) => x.classList.toggle('active', x === b));
+        try {
+          localStorage.setItem('scala40.diff', b.dataset.diff);
+        } catch {}
       });
     }
     const seatBtns = [...document.querySelectorAll('.seats-btn')];
@@ -977,6 +1029,7 @@
       const res = act('nextHand');
       if (!res.ok) return;
       snd('deal');
+      LOCAL.aiMemory = { oppPicks: [], oppDiscards: [] };
       view.selected.clear();
       setMsg('');
       if (LOCAL.mode === 'pvp') {
