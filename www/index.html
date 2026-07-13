@@ -206,6 +206,13 @@
     </div>
   </div>
 
+  <script>
+    // Native app builds (Capacitor) load from capacitor://localhost, so
+    // online play needs the deployed game server's address here, e.g.
+    // 'https://your-scala40.fly.dev'. Leave empty for web/PWA builds,
+    // which talk to the host that served them.
+    window.GAME_SERVER_URL = '';
+  </script>
   <script src="js/i18n.js"></script>
   <script src="js/sound.js"></script>
   <script src="js/rules.js"></script>

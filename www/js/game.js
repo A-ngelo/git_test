@@ -806,7 +806,11 @@
   /* ================= online mode ================= */
 
   function netAvailable() {
-    return !window.NO_NET && location.protocol !== 'file:' && 'WebSocket' in window;
+    if (window.NO_NET || !('WebSocket' in window)) return false;
+    // a native app needs the deployed server address configured
+    const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+    if (native || location.protocol === 'file:') return !!window.GAME_SERVER_URL;
+    return true;
   }
 
   function startOnlineCreate() {
@@ -944,9 +948,10 @@
     my.innerHTML = '<p class="online-msg">Loading…</p>';
     lb.innerHTML = '';
     try {
+      const base = window.NET.apiBase();
       const [mine, board] = await Promise.all([
-        fetch(`/api/stats?pid=${getPid()}`).then((r) => r.json()),
-        fetch(`/api/leaderboard?mode=${statsMode}`).then((r) => r.json()),
+        fetch(`${base}/api/stats?pid=${getPid()}`).then((r) => r.json()),
+        fetch(`${base}/api/leaderboard?mode=${statsMode}`).then((r) => r.json()),
       ]);
       my.innerHTML = '';
       const m = (mine.modes || {})[statsMode];

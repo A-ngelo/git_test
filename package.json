@@ -1,7 +1,7 @@
 {
   "name": "scala40",
   "version": "1.0.0",
-  "description": "Scala 40 (Scala Quaranta) card game \u2014 Game Boy style, with online multiplayer",
+  "description": "Scala 40 (Scala Quaranta) card game — Game Boy style, with online multiplayer",
   "private": true,
   "scripts": {
     "start": "node server/server.js",
@@ -11,6 +11,12 @@
     "assets": "npx @capacitor/assets generate --iconBackgroundColor '#0f380f' --splashBackgroundColor '#0f380f'"
   },
   "dependencies": {
+    "@capacitor-community/admob": "^8.0.0",
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
+    "@revenuecat/purchases-capacitor": "^13.2.2",
     "ws": "^8.18.0"
   }
 }

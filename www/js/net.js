@@ -29,7 +29,16 @@
   let rejoinTries = 0;
   let intentionalClose = false;
 
+  // Web builds talk to the host that served them; native app builds set
+  // window.GAME_SERVER_URL to the deployed server instead.
+  function serverBase() {
+    const url = global.GAME_SERVER_URL;
+    return url ? String(url).replace(/\/$/, '') : '';
+  }
+
   function wsUrl() {
+    const base = serverBase();
+    if (base) return base.replace(/^http/, 'ws');
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}`;
   }
@@ -141,6 +150,8 @@
     if (NET.ws) NET.ws.close();
     NET.reset();
   };
+
+  NET.apiBase = serverBase;
 
   NET.reset = () => {
     NET.view = null;
