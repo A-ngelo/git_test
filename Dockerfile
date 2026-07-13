@@ -10,5 +10,5 @@ COPY server ./server
 
 ENV PORT=3040
 EXPOSE 3040
-USER node
+# runs as root: Fly volumes mount root-owned and the ladder file lives there
 CMD ["node", "server/server.js"]
