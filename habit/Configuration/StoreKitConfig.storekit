@@ -1,0 +1,29 @@
+{
+  "identifier" : "com.pixeltide.habit",
+  "version" : {
+    "original" : "1.0",
+    "major" : 1,
+    "minor" : 0
+  },
+  "products" : [
+    {
+      "type" : "NON_CONSUMABLE",
+      "identifier" : "com.pixeltide.habit.full",
+      "displayPrice" : "4.99",
+      "displayName" : "Habit Full Access",
+      "description" : "Unlock all habits, widgets, and future updates."
+    },
+    {
+      "type" : "AUTO_RENEWABLE_SUBSCRIPTION",
+      "identifier" : "com.pixeltide.bundle.monthly",
+      "displayPrice" : "19.99",
+      "displayName" : "Pixeltide Bundle",
+      "description" : "Unlock all Pixeltide Studio apps — current and future.",
+      "subscriptionGroup" : {
+        "id" : "pixeltide_bundle",
+        "name" : "Pixeltide Bundle Subscription"
+      },
+      "subscriptionGroupLevel" : 1
+    }
+  ]
+}
