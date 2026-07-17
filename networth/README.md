@@ -32,15 +32,18 @@ of retirement entries. Months of runway = liquidity ÷ monthly expenses.
 ## Put it on your iPhone Home Screen
 
 The app is a full PWA (manifest + icons + offline service worker). iOS
-requires it to be served over **HTTPS** — the easiest free host is GitHub
-Pages:
+requires it to be served over **HTTPS**, and this repo ships a GitHub
+Actions workflow (`.github/workflows/deploy-ledger.yml`) that enables
+GitHub Pages and publishes the `networth/` folder automatically on every
+push to `main`:
 
-1. Merge this branch to `main`, then in the repo go to
-   **Settings → Pages → Deploy from a branch**, pick `main` and `/ (root)`.
-2. After a minute the app is live at
-   `https://<username>.github.io/git_test/networth/`.
-3. Open that URL in **Safari** on the iPhone, tap **Share →
+1. After the workflow's first run, the app is live at
+   `https://<username>.github.io/git_test/`.
+2. Open that URL in **Safari** on the iPhone, tap **Share →
    Add to Home Screen**.
+
+(Note: on GitHub's free plan, Pages only works if the repository is
+public.)
 
 It then launches full-screen like a native app with its own paper-and-ink
 icon, and works completely offline — the service worker caches the app
