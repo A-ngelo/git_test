@@ -457,10 +457,23 @@ function projectSeries(list, years) {
   return out;
 }
 
-/* first crossing of the next round million, monthly resolution, 50y cap */
+/* The forecast covers growth assets only: positive-value holdings that
+   aren't vehicles. Debts and depreciating vehicles are left out, so this
+   projects what your cash, investments, crypto, retirement and real
+   estate are worth over time — not net worth. */
+const VEHICLE_CATEGORY = "vehicles";
+function isForecastable(it) {
+  return it.value > 0 && it.categoryId !== VEHICLE_CATEGORY;
+}
+function forecastItems(list = state.items) {
+  return list.filter(isForecastable);
+}
+
+/* first crossing of the next round million, monthly resolution, 50y cap.
+   `list` is already the forecastable set (all positive), so total = sum. */
 function nextMilestone(list) {
-  const net = computeMetrics(list).net;
-  const target = (Math.floor(Math.max(net, 0) / 1e6) + 1) * 1e6;
+  const total = list.reduce((a, it) => a + it.value, 0);
+  const target = (Math.floor(Math.max(total, 0) / 1e6) + 1) * 1e6;
   for (let mth = 1; mth <= 600; mth++) {
     if (projectAt(list, mth / 12) >= target) return { target, years: mth / 12 };
   }
@@ -488,13 +501,15 @@ function renderForecast() {
     row.append(b);
   }
 
-  /* what-if inputs (rebuilt here, values preserved from the scenario) */
+  /* what-if inputs (rebuilt here, values preserved from the scenario).
+     Only growth assets are offered — the forecast is about them. */
+  const fset = forecastItems();
   const entryOptions = [["", "Outside the ledger"]].concat(
-    state.items.map((i) => [i.id, `${i.name} (${money(i.value)})`])
+    fset.map((i) => [i.id, `${i.name} (${money(i.value)})`])
   );
   const fromSel = document.getElementById("wi-from");
   const toSel = document.getElementById("wi-to");
-  const validIds = new Set(state.items.map((i) => i.id));
+  const validIds = new Set(fset.map((i) => i.id));
   if (scenario.fromId && !validIds.has(scenario.fromId)) scenario.fromId = "";
   if (scenario.toId && !validIds.has(scenario.toId)) scenario.toId = "";
   fillSelect(fromSel, entryOptions, scenario.fromId);
@@ -508,30 +523,31 @@ function renderForecast() {
 function updateForecastOutputs() {
   const H = state.forecast.horizon;
   const active = scenarioActive();
-  const baseline = projectSeries(state.items, H);
-  const scen = active ? projectSeries(scenarioItems(), H) : null;
+  const fset = forecastItems();
+  const baseline = projectSeries(fset, H);
+  const scen = active ? projectSeries(forecastItems(scenarioItems()), H) : null;
 
   document.getElementById("forecast-legend").hidden = !active;
   renderForecastChart(baseline, scen, H);
 
   /* milestone note */
   const note = document.getElementById("milestone-note");
-  const ms = nextMilestone(state.items);
+  const ms = nextMilestone(fset);
   const thisYear = new Date().getFullYear();
   note.textContent = ms.years !== null
-    ? `At these assumptions you'd cross ${money(ms.target)} in about ` +
-      `${ms.years.toFixed(1)} years (${Math.round(thisYear + ms.years)}).`
-    : `${money(ms.target)} stays out of reach within 50 years at these assumptions.`;
+    ? `At these assumptions your growth assets would reach ${money(ms.target)} in ` +
+      `about ${ms.years.toFixed(1)} years (${Math.round(thisYear + ms.years)}).`
+    : `Your growth assets stay under ${money(ms.target)} for the next 50 years at these assumptions.`;
 
   /* savings-rate summary */
   const summary = document.getElementById("contrib-summary");
-  const annual = state.items.reduce((a, it) => a + annualContrib(it), 0);
-  const funded = state.items.filter((it) => annualContrib(it) !== 0).length;
+  const annual = fset.reduce((a, it) => a + annualContrib(it), 0);
+  const funded = fset.filter((it) => annualContrib(it) !== 0).length;
   if (annual === 0) {
     summary.textContent = "No contributions set yet — add amounts below to fold " +
       "regular saving into the forecast.";
   } else {
-    const invested = state.items
+    const invested = fset
       .filter((it) => annualContrib(it) > 0)
       .reduce((a, it) => a + annualContrib(it) * H, 0);
     summary.textContent =
@@ -607,7 +623,7 @@ function renderForecastChart(baseline, scen, H) {
   svg.setAttribute("viewBox", `0 0 ${W} ${Hpx}`);
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label",
-    `Projected net worth over ${H} years, from ${money(baseline[0])} to ${money(baseline[H])} on the current plan` +
+    `Projected value of your growth assets over ${H} years, from ${money(baseline[0])} to ${money(baseline[H])} on the current plan` +
     (scen ? `, or ${money(scen[H])} with the what-if move` : "") + ".");
 
   const css = getComputedStyle(document.body);
@@ -730,7 +746,7 @@ function renderForecastChart(baseline, scen, H) {
 function renderGrowthList() {
   const el = document.getElementById("growth-list");
   el.innerHTML = "";
-  const items = [...state.items].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const items = forecastItems().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   for (const it of items) {
     const row = document.createElement("div");
     row.className = "growth-row";
@@ -770,7 +786,7 @@ function renderGrowthList() {
 function renderContribList() {
   const el = document.getElementById("contrib-list");
   el.innerHTML = "";
-  const items = [...state.items].sort((a, b) => {
+  const items = forecastItems().sort((a, b) => {
     const ca = annualContrib(a), cb = annualContrib(b);
     if ((cb !== 0) - (ca !== 0)) return (cb !== 0) - (ca !== 0); // funded first
     return Math.abs(b.value) - Math.abs(a.value);
