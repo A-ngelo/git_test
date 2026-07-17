@@ -1,0 +1,64 @@
+# The Ledger — a paper-and-ink net worth tracker
+
+A sleek, dependency-free replacement for the *Assets & Debts* spreadsheet,
+styled like an e-reader page: paper background, serif type, hairline rules,
+ink-only charts, and a night mode. Open `index.html` in any browser — no
+build step, no server, no account.
+
+All data is stored privately in the browser's `localStorage` and comes
+pre-seeded with the spreadsheet's entries and assumptions.
+
+## Chapters
+
+| Chapter | What it does |
+| --- | --- |
+| **Ledger** | Every asset and debt, shelved by category with dotted-leader rows like a table of contents. Tap any row to edit its name, value, category, owner, liquidity, or special role; add or strike entries freely. |
+| **Insights** | The derived numbers the spreadsheet used to compute: net worth, home equity, available liquidity, months of runway (with and without a full HELOC draw), DeFi loan health (LTV, interest cost, stables-vs-debt buffer), per-owner totals, and a category breakdown (solid ink = assets, hatched = debts). |
+| **History** | Record a snapshot whenever you update your numbers; a crosshair-hover ink line traces net worth over time, with a full table underneath. One snapshot per date — re-recording a date updates it. |
+| **Settings** | The assumptions behind Insights (monthly expenses, HELOC limit, retirement haircut %, DeFi APR, stables balance), plus category/owner management, JSON export/import, and a reset back to the original spreadsheet data. |
+
+## How Insights are computed
+
+Entries carry two small flags that drive everything:
+
+- **Liquidity** — `liquid` (counted in full), `retirement` (counted at the
+  haircut % from Settings), or `illiquid` (not counted).
+- **Special role** — `property` / `property-loan` / `heloc` feed home equity
+  and HELOC headroom; `defi-vault` / `defi-loan` feed the DeFi health panel.
+
+Available liquidity = liquid entries + (DeFi vault − DeFi loan) + haircut %
+of retirement entries. Months of runway = liquidity ÷ monthly expenses.
+
+## Put it on your iPhone Home Screen
+
+The app is a full PWA (manifest + icons + offline service worker). iOS
+requires it to be served over **HTTPS** — the easiest free host is GitHub
+Pages:
+
+1. Merge this branch to `main`, then in the repo go to
+   **Settings → Pages → Deploy from a branch**, pick `main` and `/ (root)`.
+2. After a minute the app is live at
+   `https://<username>.github.io/git_test/networth/`.
+3. Open that URL in **Safari** on the iPhone, tap **Share →
+   Add to Home Screen**.
+
+It then launches full-screen like a native app with its own paper-and-ink
+icon, and works completely offline — the service worker caches the app
+shell, and your data is already local. The app also calls
+`navigator.storage.persist()` so the browser treats your data as
+not-to-be-evicted.
+
+Two saving notes:
+
+- Data is saved automatically on **every** change (there is no save
+  button to forget).
+- The Home Screen app and Safari keep *separate* storage on iOS — after
+  installing, do your tracking in the installed app. To carry data over
+  from Safari (or any other device), use **Settings → Export JSON** there
+  and **Import JSON** in the installed app.
+
+## Conventions
+
+- Positive value = asset, negative value = debt (same as the spreadsheet).
+- Everything is local: export a JSON backup from Settings before clearing
+  browser data or to move to another device.
