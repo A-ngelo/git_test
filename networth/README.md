@@ -14,6 +14,7 @@ pre-seeded with the spreadsheet's entries and assumptions.
 | --- | --- |
 | **Ledger** | Every asset and debt, shelved by category with dotted-leader rows like a table of contents. Tap any row to edit its name, value, category, owner, liquidity, or special role; add or strike entries freely. |
 | **Insights** | The derived numbers the spreadsheet used to compute: net worth, home equity, available liquidity, months of runway (with and without a full HELOC draw), DeFi loan health (LTV, interest cost, stables-vs-debt buffer), per-owner totals, and a category breakdown (solid ink = assets, hatched = debts). |
+| **Forecast** | Every entry carries an expected yearly change (%), editable inline or in the entry dialog. A projected net worth chart over a 1–30 year horizon, a next-milestone estimate, and a **what-if calculator**: move an amount between entries (or in/out of the ledger) to see the immediate impact on net worth, liquidity, runway, LTV and home equity, plus the opportunity cost or gain at the horizon versus the current plan (dashed line overlay). The ledger itself is never modified by a what-if. |
 | **History** | Record a snapshot whenever you update your numbers; a crosshair-hover ink line traces net worth over time, with a full table underneath. One snapshot per date — re-recording a date updates it. |
 | **Settings** | The assumptions behind Insights (monthly expenses, HELOC limit, retirement haircut %, DeFi APR, stables balance), plus category/owner management, JSON export/import, and a reset back to the original spreadsheet data. |
 

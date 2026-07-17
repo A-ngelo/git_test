@@ -3,7 +3,7 @@
    offline), refresh the cache in the background so the next launch
    picks up updates. Bump CACHE to force a clean refetch. */
 
-const CACHE = "ledger-v1";
+const CACHE = "ledger-v2";
 const ASSETS = [
   "./",
   "./index.html",

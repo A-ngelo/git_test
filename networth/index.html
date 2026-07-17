@@ -42,6 +42,7 @@
   <nav class="chapters" role="tablist" aria-label="Sections">
     <button role="tab" data-tab="ledger" aria-selected="true">Ledger</button>
     <button role="tab" data-tab="insights" aria-selected="false">Insights</button>
+    <button role="tab" data-tab="forecast" aria-selected="false">Forecast</button>
     <button role="tab" data-tab="history" aria-selected="false">History</button>
     <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
   </nav>
@@ -57,6 +58,43 @@
   <!-- ═══════════ INSIGHTS ═══════════ -->
   <main id="tab-insights" class="tab-panel" role="tabpanel" hidden>
     <div id="insights-body"></div>
+  </main>
+
+  <!-- ═══════════ FORECAST ═══════════ -->
+  <main id="tab-forecast" class="tab-panel" role="tabpanel" hidden>
+    <h2 class="section-label">Horizon</h2>
+    <div class="horizon-row" id="horizon-row"></div>
+    <div class="chart-legend" id="forecast-legend" hidden>
+      <span><span class="legend-swatch"></span>Current plan</span>
+      <span><span class="legend-swatch dashed"></span>What-if</span>
+    </div>
+    <div id="forecast-chart-wrap" class="chart-wrap"></div>
+    <div id="forecast-tooltip" class="chart-tooltip" hidden></div>
+    <p class="fine-print" id="milestone-note"></p>
+
+    <h2 class="section-label">What if&hellip;</h2>
+    <p class="fine-print">Thinking of selling, buying more, or paying something down?
+    Move an amount between entries &mdash; or in/out of the ledger entirely &mdash;
+    and see where it leaves you today and at the horizon. The ledger itself is
+    untouched; this is purely a sketch.</p>
+    <div class="whatif-grid">
+      <label>Amount ($)
+        <input id="wi-amount" type="number" min="0" step="any" placeholder="e.g. 10000">
+      </label>
+      <label>From
+        <select id="wi-from"></select>
+      </label>
+      <label>To
+        <select id="wi-to"></select>
+      </label>
+    </div>
+    <div id="whatif-results"></div>
+
+    <h2 class="section-label">Growth assumptions</h2>
+    <p class="fine-print">Expected yearly change for each entry, in % per year &mdash;
+    use negative numbers for things that lose value (cars) or debts being paid down.
+    A simple compound model; edit freely, it drives everything above.</p>
+    <div id="growth-list"></div>
   </main>
 
   <!-- ═══════════ HISTORY ═══════════ -->
@@ -118,9 +156,14 @@
       <input type="text" name="name" required autocomplete="off">
     </label>
 
-    <label>Value (negative for a debt)
-      <input type="text" name="value" inputmode="decimal" required autocomplete="off" placeholder="e.g. 12500 or -3400">
-    </label>
+    <div class="form-row">
+      <label>Value (negative for a debt)
+        <input type="text" name="value" inputmode="decimal" required autocomplete="off" placeholder="e.g. 12500 or -3400">
+      </label>
+      <label>Yearly change (%)
+        <input type="text" name="growth" inputmode="decimal" autocomplete="off" placeholder="e.g. 7 or -10">
+      </label>
+    </div>
 
     <div class="form-row">
       <label>Category
