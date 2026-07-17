@@ -904,4 +904,14 @@ function renderAll() {
 applyTheme();
 renderAll();
 
+/* PWA: offline cache + ask the browser not to evict our data.
+   Service workers need http(s) — opening via file:// still works,
+   just without offline install. */
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().catch(() => {});
+}
+
 })();

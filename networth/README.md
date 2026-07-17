@@ -29,6 +29,34 @@ Entries carry two small flags that drive everything:
 Available liquidity = liquid entries + (DeFi vault − DeFi loan) + haircut %
 of retirement entries. Months of runway = liquidity ÷ monthly expenses.
 
+## Put it on your iPhone Home Screen
+
+The app is a full PWA (manifest + icons + offline service worker). iOS
+requires it to be served over **HTTPS** — the easiest free host is GitHub
+Pages:
+
+1. Merge this branch to `main`, then in the repo go to
+   **Settings → Pages → Deploy from a branch**, pick `main` and `/ (root)`.
+2. After a minute the app is live at
+   `https://<username>.github.io/git_test/networth/`.
+3. Open that URL in **Safari** on the iPhone, tap **Share →
+   Add to Home Screen**.
+
+It then launches full-screen like a native app with its own paper-and-ink
+icon, and works completely offline — the service worker caches the app
+shell, and your data is already local. The app also calls
+`navigator.storage.persist()` so the browser treats your data as
+not-to-be-evicted.
+
+Two saving notes:
+
+- Data is saved automatically on **every** change (there is no save
+  button to forget).
+- The Home Screen app and Safari keep *separate* storage on iOS — after
+  installing, do your tracking in the installed app. To carry data over
+  from Safari (or any other device), use **Settings → Export JSON** there
+  and **Import JSON** in the installed app.
+
 ## Conventions
 
 - Positive value = asset, negative value = debt (same as the spreadsheet).
