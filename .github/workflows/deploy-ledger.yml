@@ -1,5 +1,10 @@
 name: Deploy The Ledger to GitHub Pages
 
+# Publishes networth/ to the gh-pages branch, which GitHub Pages serves
+# at https://<owner>.github.io/git_test/. Branch-based publishing is used
+# because creating an Actions-source Pages site requires admin rights the
+# workflow token doesn't have; pushing gh-pages auto-created the site.
+
 on:
   push:
     branches: [main]
@@ -9,9 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -20,18 +23,19 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-        with:
-          # creates the Pages site on first run so no manual setup is needed
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          # publish only the app, not the rest of the repository
-          path: networth
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish networth/ to gh-pages
+        run: |
+          cd networth
+          touch .nojekyll
+          git init -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Publish The Ledger (${GITHUB_SHA})"
+          git push --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

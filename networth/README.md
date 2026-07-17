@@ -31,14 +31,13 @@ of retirement entries. Months of runway = liquidity ÷ monthly expenses.
 
 ## Put it on your iPhone Home Screen
 
-The app is a full PWA (manifest + icons + offline service worker). iOS
-requires it to be served over **HTTPS**, and this repo ships a GitHub
-Actions workflow (`.github/workflows/deploy-ledger.yml`) that enables
-GitHub Pages and publishes the `networth/` folder automatically on every
-push to `main`:
+The app is a full PWA (manifest + icons + offline service worker) and is
+served over HTTPS by GitHub Pages from the `gh-pages` branch. A workflow
+(`.github/workflows/deploy-ledger.yml`) republishes `networth/` to that
+branch on every push to `main`, so the live site stays current
+automatically:
 
-1. After the workflow's first run, the app is live at
-   `https://<username>.github.io/git_test/`.
+1. The app is live at `https://<username>.github.io/git_test/`.
 2. Open that URL in **Safari** on the iPhone, tap **Share →
    Add to Home Screen**.
 
