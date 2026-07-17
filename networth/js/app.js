@@ -56,6 +56,7 @@ function seedState() {
   const items = rows.map(([name, value, categoryId, owner, liquidity, role], i) => ({
     id: "seed-" + i, name, value, categoryId, owner, liquidity, role,
   }));
+  items.forEach((it) => { it.growth = defaultGrowth(it); });
 
   const state = {
     version: 1,
@@ -71,6 +72,7 @@ function seedState() {
     categories: cats,
     items,
     snapshots: [],
+    forecast: { horizon: 10 },
   };
 
   const t = totals(state);
@@ -83,6 +85,20 @@ function seedState() {
   return state;
 }
 
+/* starting-point growth guesses (% per year); every entry is editable */
+function defaultGrowth(it) {
+  if (it.role === "property") return 3;
+  if (it.role === "defi-vault") return 5;
+  if (it.value < 0) return 0;               // debts stay flat unless told otherwise
+  switch (it.categoryId) {
+    case "vehicles":    return -10;
+    case "retirement":  return 6;
+    case "investments": return 6;
+    case "crypto":      return 5;
+    default:            return 0;
+  }
+}
+
 /* ── Store ──────────────────────────────────────────────────── */
 
 let state = load();
@@ -92,7 +108,15 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s && s.version === 1 && Array.isArray(s.items)) return s;
+      if (s && s.version === 1 && Array.isArray(s.items)) {
+        let migrated = false;
+        for (const it of s.items) {
+          if (typeof it.growth !== "number") { it.growth = defaultGrowth(it); migrated = true; }
+        }
+        if (!s.forecast) { s.forecast = { horizon: 10 }; migrated = true; }
+        if (migrated) persist(s);
+        return s;
+      }
     }
   } catch (_) { /* fall through to seed */ }
   const s = seedState();
@@ -126,6 +150,36 @@ function totals(s = state) {
 
 function sumWhere(pred) {
   return state.items.filter(pred).reduce((a, it) => a + it.value, 0);
+}
+
+/* every derived number, computable for any item list (real or what-if) */
+function computeMetrics(list) {
+  const st = state.settings;
+  let assets = 0, debts = 0;
+  for (const it of list) { if (it.value >= 0) assets += it.value; else debts += it.value; }
+  const sum = (pred) => list.filter(pred).reduce((a, it) => a + it.value, 0);
+
+  const propertyValue = sum((i) => i.role === "property");
+  const propertyDebt = sum((i) => i.role === "property-loan" || i.role === "heloc");
+  const helocBalance = Math.abs(sum((i) => i.role === "heloc"));
+  const vault = sum((i) => i.role === "defi-vault");
+  const defiLoan = Math.abs(sum((i) => i.role === "defi-loan"));
+  const defiNet = vault - defiLoan;
+  const liquid = sum((i) => i.liquidity === "liquid" && !(i.role || "").startsWith("defi"));
+  const retirementFunds = sum((i) => i.liquidity === "retirement" && i.value > 0);
+  const liquidity = liquid + defiNet + retirementFunds * (st.retirementPct / 100);
+
+  return {
+    assets, debts, net: assets + debts,
+    propertyValue, propertyDebt, homeEquity: propertyValue + propertyDebt,
+    helocHeadroom: Math.max(0, st.helocLimit - helocBalance),
+    vault, defiLoan, defiNet,
+    ltv: vault > 0 ? defiLoan / vault : 0,
+    interestMo: (defiLoan * st.defiApr) / 100 / 12,
+    stablesGap: st.defiStables - defiLoan,
+    liquidity,
+    months: st.monthlyExpenses > 0 ? liquidity / st.monthlyExpenses : 0,
+  };
 }
 
 /* ── Tabs ───────────────────────────────────────────────────── */
@@ -257,30 +311,12 @@ function esc(s) {
 
 function renderInsights() {
   const el = document.getElementById("insights-body");
-  const t = totals();
   const st = state.settings;
-
-  /* home */
-  const propertyValue = sumWhere((i) => i.role === "property");
-  const propertyDebt = sumWhere((i) => i.role === "property-loan" || i.role === "heloc");
-  const homeEquity = propertyValue + propertyDebt;
-  const helocBalance = Math.abs(sumWhere((i) => i.role === "heloc"));
-  const helocHeadroom = Math.max(0, st.helocLimit - helocBalance);
-
-  /* defi */
-  const vault = sumWhere((i) => i.role === "defi-vault");
-  const defiLoan = Math.abs(sumWhere((i) => i.role === "defi-loan"));
-  const ltv = vault > 0 ? defiLoan / vault : 0;
-  const defiNet = vault - defiLoan;
-  const interestMo = (defiLoan * st.defiApr) / 100 / 12;
-  const stablesGap = st.defiStables - defiLoan;
-
-  /* liquidity */
-  const liquid = sumWhere((i) => i.liquidity === "liquid" && !i.role.startsWith("defi"));
-  const retirementFunds = sumWhere((i) => i.liquidity === "retirement" && i.value > 0);
-  const retirementCut = retirementFunds * (st.retirementPct / 100);
-  const liquidity = liquid + defiNet + retirementCut;
-  const months = st.monthlyExpenses > 0 ? liquidity / st.monthlyExpenses : 0;
+  const m = computeMetrics(state.items);
+  const t = { assets: m.assets, debts: m.debts, net: m.net };
+  const { propertyValue, propertyDebt, homeEquity, helocHeadroom,
+          vault, defiLoan, defiNet, ltv, interestMo, stablesGap,
+          liquidity, months } = m;
 
   /* owners */
   const ownerRows = state.owners
@@ -356,6 +392,344 @@ function renderInsights() {
     breakEl.append(row);
   }
 }
+
+/* ── Forecast tab ───────────────────────────────────────────── */
+
+const HORIZONS = [1, 5, 10, 20, 30];
+let scenario = { fromId: "", toId: "", amount: 0 }; // "" = outside the ledger
+
+function scenarioActive() {
+  return scenario.amount > 0 && scenario.fromId !== scenario.toId;
+}
+
+function scenarioItems() {
+  const items = state.items.map((i) => ({ ...i }));
+  if (!scenarioActive()) return items;
+  const from = items.find((i) => i.id === scenario.fromId);
+  const to = items.find((i) => i.id === scenario.toId);
+  if (from) from.value -= scenario.amount;
+  if (to) to.value += scenario.amount;
+  return items;
+}
+
+function projectAt(list, years) {
+  let v = 0;
+  for (const it of list) v += it.value * Math.pow(1 + (it.growth || 0) / 100, years);
+  return v;
+}
+
+function projectSeries(list, years) {
+  const out = [];
+  for (let t = 0; t <= years; t++) out.push(projectAt(list, t));
+  return out;
+}
+
+/* first crossing of the next round million, monthly resolution, 50y cap */
+function nextMilestone(list) {
+  const net = computeMetrics(list).net;
+  const target = (Math.floor(Math.max(net, 0) / 1e6) + 1) * 1e6;
+  for (let mth = 1; mth <= 600; mth++) {
+    if (projectAt(list, mth / 12) >= target) return { target, years: mth / 12 };
+  }
+  return { target, years: null };
+}
+
+function signedMoney(v) {
+  return (v < 0 ? "− " : "+ ") + moneyAbs(v);
+}
+
+function renderForecast() {
+  /* horizon buttons */
+  const row = document.getElementById("horizon-row");
+  row.innerHTML = "";
+  for (const h of HORIZONS) {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = h + " yr" + (h > 1 ? "s" : "");
+    b.setAttribute("aria-pressed", String(state.forecast.horizon === h));
+    b.addEventListener("click", () => {
+      state.forecast.horizon = h;
+      persist();
+      renderForecast();
+    });
+    row.append(b);
+  }
+
+  /* what-if inputs (rebuilt here, values preserved from the scenario) */
+  const entryOptions = [["", "Outside the ledger"]].concat(
+    state.items.map((i) => [i.id, `${i.name} (${money(i.value)})`])
+  );
+  const fromSel = document.getElementById("wi-from");
+  const toSel = document.getElementById("wi-to");
+  const validIds = new Set(state.items.map((i) => i.id));
+  if (scenario.fromId && !validIds.has(scenario.fromId)) scenario.fromId = "";
+  if (scenario.toId && !validIds.has(scenario.toId)) scenario.toId = "";
+  fillSelect(fromSel, entryOptions, scenario.fromId);
+  fillSelect(toSel, entryOptions, scenario.toId);
+  document.getElementById("wi-amount").value = scenario.amount || "";
+
+  updateForecastOutputs();
+}
+
+/* everything below the inputs — safe to re-run on each keystroke */
+function updateForecastOutputs() {
+  const H = state.forecast.horizon;
+  const active = scenarioActive();
+  const baseline = projectSeries(state.items, H);
+  const scen = active ? projectSeries(scenarioItems(), H) : null;
+
+  document.getElementById("forecast-legend").hidden = !active;
+  renderForecastChart(baseline, scen, H);
+
+  /* milestone note */
+  const note = document.getElementById("milestone-note");
+  const ms = nextMilestone(state.items);
+  const thisYear = new Date().getFullYear();
+  note.textContent = ms.years !== null
+    ? `At these assumptions you'd cross ${money(ms.target)} in about ` +
+      `${ms.years.toFixed(1)} years (${Math.round(thisYear + ms.years)}).`
+    : `${money(ms.target)} stays out of reach within 50 years at these assumptions.`;
+
+  /* what-if results */
+  const res = document.getElementById("whatif-results");
+  if (!active) {
+    res.innerHTML = `<p class="empty-note">Enter an amount and pick where it moves.</p>`;
+    return;
+  }
+  const mNow = computeMetrics(state.items);
+  const mScen = computeMetrics(scenarioItems());
+  const dNet = mScen.net - mNow.net;
+  const dLiq = mScen.liquidity - mNow.liquidity;
+  const dMonths = mScen.months - mNow.months;
+  const endBase = baseline[H];
+  const endScen = scen[H];
+  const dEnd = endScen - endBase;
+
+  let html = `<div class="insight-grid">`;
+  html += tile("Net worth today", money(mScen.net),
+    dNet === 0 ? "unchanged — money moved, not spent" : signedMoney(dNet) + " vs. now");
+  html += tile("Liquidity", money(mScen.liquidity),
+    dLiq === 0 ? "unchanged" : signedMoney(dLiq) + " vs. now");
+  html += tile("Months of runway", mScen.months.toFixed(1),
+    dMonths === 0 ? "unchanged" : signedMoney(dMonths).replace("$", "") + " months");
+  if (mNow.vault > 0 || mScen.vault > 0) {
+    const dLtv = (mScen.ltv - mNow.ltv) * 100;
+    html += tile("DeFi loan-to-value", (mScen.ltv * 100).toFixed(1) + "%",
+      Math.abs(dLtv) < 0.05 ? "unchanged" : (dLtv > 0 ? "up " : "down ") + Math.abs(dLtv).toFixed(1) + " pts");
+  }
+  if (Math.abs(mScen.homeEquity - mNow.homeEquity) > 0.5) {
+    html += tile("Home equity", money(mScen.homeEquity),
+      signedMoney(mScen.homeEquity - mNow.homeEquity) + " vs. now");
+  }
+  html += `</div>`;
+
+  html += `<h2 class="section-label">In ${H} year${H > 1 ? "s" : ""}</h2><div class="insight-grid">`;
+  html += tile("Current plan", money(endBase));
+  html += tile("With this move", money(endScen));
+  html += tile(dEnd < 0 ? "Opportunity cost" : "Long-run gain", signedMoney(dEnd),
+    "difference at the horizon");
+  html += `</div>`;
+  res.innerHTML = html;
+}
+
+function renderForecastChart(baseline, scen, H) {
+  const wrap = document.getElementById("forecast-chart-wrap");
+  const tip = document.getElementById("forecast-tooltip");
+  wrap.innerHTML = "";
+  tip.hidden = true;
+
+  const W = 640, Hpx = 260;
+  const pad = { top: 18, right: 16, bottom: 28, left: 62 };
+  const iw = W - pad.left - pad.right;
+  const ih = Hpx - pad.top - pad.bottom;
+
+  const all = scen ? baseline.concat(scen) : baseline;
+  let yMin = Math.min(...all), yMax = Math.max(...all);
+  if (yMin === yMax) { yMin -= 1; yMax += 1; }
+  const padY = (yMax - yMin) * 0.08;
+  yMin -= padY; yMax += padY;
+
+  const X = (t) => pad.left + (t / H) * iw;
+  const Y = (v) => pad.top + (1 - (v - yMin) / (yMax - yMin)) * ih;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${Hpx}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label",
+    `Projected net worth over ${H} years, from ${money(baseline[0])} to ${money(baseline[H])} on the current plan` +
+    (scen ? `, or ${money(scen[H])} with the what-if move` : "") + ".");
+
+  const css = getComputedStyle(document.body);
+  const ink = css.getPropertyValue("--ink").trim();
+  const inkSoft = css.getPropertyValue("--ink-soft").trim();
+  const inkFaint = css.getPropertyValue("--ink-faint").trim();
+  const hairline = css.getPropertyValue("--hairline-soft").trim();
+
+  const mk = (tag, attrs) => {
+    const n = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  };
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = yMin + ((yMax - yMin) * i) / ticks;
+    const y = Y(v);
+    svg.append(mk("line", {
+      x1: pad.left, x2: W - pad.right, y1: y, y2: y,
+      stroke: hairline, "stroke-width": 1, "stroke-dasharray": "1 4",
+    }));
+    const label = mk("text", {
+      x: pad.left - 8, y: y + 3, "text-anchor": "end",
+      "font-size": 10, fill: inkFaint, "font-family": "inherit",
+    });
+    label.textContent = compactMoney(v);
+    svg.append(label);
+  }
+
+  const thisYear = new Date().getFullYear();
+  for (const t of [0, H]) {
+    const label = mk("text", {
+      x: X(t), y: Hpx - 8,
+      "text-anchor": t === 0 ? "start" : "end",
+      "font-size": 10, fill: inkFaint, "font-family": "inherit",
+    });
+    label.textContent = String(thisYear + t);
+    svg.append(label);
+  }
+
+  const lineD = (series) =>
+    "M" + series.map((v, t) => `${X(t).toFixed(1)},${Y(v).toFixed(1)}`).join(" L");
+
+  if (scen) {
+    svg.append(mk("path", {
+      d: lineD(scen), fill: "none", stroke: inkSoft,
+      "stroke-width": 2, "stroke-dasharray": "6 5",
+      "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+  }
+  svg.append(mk("path", {
+    d: lineD(baseline), fill: "none", stroke: ink,
+    "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+  }));
+
+  /* direct labels at the ends */
+  const endLabel = (series, color, dy) => {
+    const label = mk("text", {
+      x: W - pad.right - 2, y: Math.min(Math.max(Y(series[H]) + dy, 12), Hpx - pad.bottom - 4),
+      "text-anchor": "end", "font-size": 11, fill: color,
+      "font-family": "inherit", "font-weight": "600",
+    });
+    label.textContent = money(series[H]);
+    return label;
+  };
+  if (scen) {
+    const above = scen[H] >= baseline[H];
+    svg.append(endLabel(baseline, ink, above ? 14 : -8));
+    svg.append(endLabel(scen, inkSoft, above ? -8 : 14));
+  } else {
+    svg.append(endLabel(baseline, ink, -8));
+  }
+
+  /* hover crosshair + tooltip */
+  const crosshair = mk("line", {
+    x1: 0, x2: 0, y1: pad.top, y2: Hpx - pad.bottom,
+    stroke: inkFaint, "stroke-width": 1, "stroke-dasharray": "2 3", visibility: "hidden",
+  });
+  svg.append(crosshair);
+  const overlay = mk("rect", {
+    x: pad.left, y: pad.top, width: iw, height: ih, fill: "transparent",
+  });
+  overlay.style.cursor = "crosshair";
+  svg.append(overlay);
+
+  function showHover(e) {
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const rect = svg.getBoundingClientRect();
+    const px = ((clientX - rect.left) / rect.width) * W;
+    const t = Math.max(0, Math.min(H, Math.round(((px - pad.left) / iw) * H)));
+    const x = X(t);
+    crosshair.setAttribute("x1", x); crosshair.setAttribute("x2", x);
+    crosshair.setAttribute("visibility", "visible");
+    let html = `<strong>${thisYear + t}</strong> (+${t} yr${t === 1 ? "" : "s"})` +
+      `<br>${esc(money(baseline[t]))}`;
+    if (scen) {
+      html += `<br>what-if: ${esc(money(scen[t]))}` +
+        `<br><span style="opacity:.75">Δ ${esc(signedMoney(scen[t] - baseline[t]))}</span>`;
+    }
+    tip.innerHTML = html;
+    tip.style.left = rect.left + (x / W) * rect.width + "px";
+    tip.style.top = rect.top + (Y(baseline[t]) / Hpx) * rect.height + "px";
+    tip.hidden = false;
+  }
+  function hideHover() {
+    crosshair.setAttribute("visibility", "hidden");
+    tip.hidden = true;
+  }
+  overlay.addEventListener("mousemove", showHover);
+  overlay.addEventListener("touchstart", showHover, { passive: true });
+  overlay.addEventListener("touchmove", showHover, { passive: true });
+  overlay.addEventListener("mouseleave", hideHover);
+  overlay.addEventListener("touchend", hideHover);
+
+  wrap.append(svg);
+}
+
+/* growth assumptions list */
+function renderGrowthList() {
+  const el = document.getElementById("growth-list");
+  el.innerHTML = "";
+  const items = [...state.items].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  for (const it of items) {
+    const row = document.createElement("div");
+    row.className = "growth-row";
+
+    const name = document.createElement("span");
+    name.className = "g-name";
+    name.textContent = it.name;
+
+    const val = document.createElement("span");
+    val.className = "g-val";
+    val.textContent = money(it.value);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.value = it.growth;
+    input.setAttribute("aria-label", `Yearly change for ${it.name}, percent`);
+    input.addEventListener("change", () => {
+      const g = parseFloat(input.value);
+      if (!Number.isFinite(g)) { input.value = it.growth; return; }
+      it.growth = g;
+      persist();
+      updateForecastOutputs();
+    });
+
+    const pct = document.createElement("span");
+    pct.className = "g-val";
+    pct.style.minWidth = "2rem";
+    pct.textContent = "%/yr";
+
+    row.append(name, val, input, pct);
+    el.append(row);
+  }
+}
+
+/* what-if input wiring (elements are static, listeners attached once) */
+document.getElementById("wi-amount").addEventListener("input", (e) => {
+  const v = parseFloat(e.target.value);
+  scenario.amount = Number.isFinite(v) && v > 0 ? v : 0;
+  updateForecastOutputs();
+});
+document.getElementById("wi-from").addEventListener("change", (e) => {
+  scenario.fromId = e.target.value;
+  updateForecastOutputs();
+});
+document.getElementById("wi-to").addEventListener("change", (e) => {
+  scenario.toId = e.target.value;
+  updateForecastOutputs();
+});
 
 /* ── History tab ────────────────────────────────────────────── */
 
@@ -810,6 +1184,7 @@ function openItemDialog(id) {
   );
   itemForm.elements.liquidity.value = it ? it.liquidity : "liquid";
   itemForm.elements.role.value = it ? it.role : "";
+  itemForm.elements.growth.value = it ? it.growth : "";
 
   itemDialog.showModal();
 }
@@ -834,6 +1209,7 @@ itemForm.addEventListener("submit", (e) => {
     itemForm.elements.value.focus();
     return;
   }
+  const growth = parseFloat(String(itemForm.elements.growth.value).replace(/[%\s]/g, ""));
   const data = {
     name: itemForm.elements.name.value.trim(),
     value,
@@ -841,6 +1217,7 @@ itemForm.addEventListener("submit", (e) => {
     owner: itemForm.elements.owner.value,
     liquidity: itemForm.elements.liquidity.value,
     role: itemForm.elements.role.value,
+    growth: Number.isFinite(growth) ? growth : 0,
   };
   if (!data.name) { e.preventDefault(); return; }
   if (editingId) {
@@ -889,6 +1266,7 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
   persist();
   applyTheme();
   renderChart(); // chart colors are sampled from CSS variables
+  updateForecastOutputs();
 });
 
 /* ── Boot ───────────────────────────────────────────────────── */
@@ -897,6 +1275,8 @@ function renderAll() {
   renderHero();
   renderLedger();
   renderInsights();
+  renderForecast();
+  renderGrowthList();
   renderHistory();
   renderSettings();
 }
