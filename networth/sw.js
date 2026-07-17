@@ -1,9 +1,11 @@
 /* The Ledger — offline service worker.
    Stale-while-revalidate: serve from cache instantly (works fully
    offline), refresh the cache in the background so the next launch
-   picks up updates. Bump CACHE to force a clean refetch. */
+   picks up updates. All refresh fetches bypass the HTTP cache —
+   GitHub Pages serves with a 10-minute max-age that would otherwise
+   let stale files be re-cached. Bump CACHE to force a clean refetch. */
 
-const CACHE = "ledger-v2";
+const CACHE = "ledger-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -17,7 +19,11 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE).then((c) =>
+      c.addAll(ASSETS.map((u) => new Request(u, { cache: "reload" })))
+    )
+  );
   self.skipWaiting();
 });
 
@@ -35,7 +41,7 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(e.request, { ignoreSearch: true });
-      const refresh = fetch(e.request)
+      const refresh = fetch(e.request.url, { cache: "no-cache" })
         .then((res) => {
           if (res && res.ok) cache.put(e.request, res.clone());
           return res;
