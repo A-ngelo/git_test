@@ -71,6 +71,7 @@
     <div id="forecast-chart-wrap" class="chart-wrap"></div>
     <div id="forecast-tooltip" class="chart-tooltip" hidden></div>
     <p class="fine-print" id="milestone-note"></p>
+    <p class="fine-print" id="contrib-summary"></p>
 
     <h2 class="section-label">What if&hellip;</h2>
     <p class="fine-print">Thinking of selling, buying more, or paying something down?
@@ -89,6 +90,13 @@
       </label>
     </div>
     <div id="whatif-results"></div>
+
+    <h2 class="section-label">Contributions</h2>
+    <p class="fine-print">How much you add to each account, and how often. These
+    are treated as steady deposits that compound at the account&rsquo;s growth rate
+    &mdash; the engine behind a retirement forecast. Leave an amount blank for
+    accounts you don&rsquo;t fund. (On a debt, a contribution pays it down.)</p>
+    <div id="contrib-list"></div>
 
     <h2 class="section-label">Growth assumptions</h2>
     <p class="fine-print">Expected yearly change for each entry, in % per year &mdash;
@@ -162,6 +170,21 @@
       </label>
       <label>Yearly change (%)
         <input type="text" name="growth" inputmode="decimal" autocomplete="off" placeholder="e.g. 7 or -10">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Contribution ($)
+        <input type="text" name="contrib" inputmode="decimal" autocomplete="off" placeholder="e.g. 500 (blank = none)">
+      </label>
+      <label>How often
+        <select name="contribFreq">
+          <option value="daily">Per day</option>
+          <option value="weekly">Per week</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="monthly">Per month</option>
+          <option value="yearly">Per year</option>
+        </select>
       </label>
     </div>
 

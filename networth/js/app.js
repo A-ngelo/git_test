@@ -56,7 +56,11 @@ function seedState() {
   const items = rows.map(([name, value, categoryId, owner, liquidity, role], i) => ({
     id: "seed-" + i, name, value, categoryId, owner, liquidity, role,
   }));
-  items.forEach((it) => { it.growth = defaultGrowth(it); });
+  items.forEach((it) => {
+    it.growth = defaultGrowth(it);
+    it.contrib = 0;              // amount per period; you fill these in
+    it.contribFreq = "monthly"; // used only when contrib > 0
+  });
 
   const state = {
     version: 1,
@@ -112,6 +116,8 @@ function load() {
         let migrated = false;
         for (const it of s.items) {
           if (typeof it.growth !== "number") { it.growth = defaultGrowth(it); migrated = true; }
+          if (typeof it.contrib !== "number") { it.contrib = 0; migrated = true; }
+          if (!it.contribFreq) { it.contribFreq = "monthly"; migrated = true; }
         }
         if (!s.forecast) { s.forecast = { horizon: 10 }; migrated = true; }
         if (migrated) persist(s);
@@ -412,9 +418,36 @@ function scenarioItems() {
   return items;
 }
 
+/* contribution cadences: value, short suffix, deposits per year */
+const FREQS = [
+  ["daily",    "/day",     365],
+  ["weekly",   "/week",     52],
+  ["biweekly", "/2 weeks",  26],
+  ["monthly",  "/month",    12],
+  ["yearly",   "/year",      1],
+];
+const FREQ_PER_YEAR = Object.fromEntries(FREQS.map(([k, , n]) => [k, n]));
+const FREQ_SUFFIX = Object.fromEntries(FREQS.map(([k, s]) => [k, s]));
+
+function annualContrib(it) {
+  const per = FREQ_PER_YEAR[it.contribFreq] ?? 12;
+  return (it.contrib || 0) * per;
+}
+
+/* future value of one entry: principal compounds, contributions compound as
+   an annuity at the same rate. C is the annualized deposit. */
+function projectItemAt(it, years) {
+  const g = (it.growth || 0) / 100;
+  const gf = Math.pow(1 + g, years);
+  let fv = it.value * gf;
+  const C = annualContrib(it);
+  if (C) fv += Math.abs(g) < 1e-9 ? C * years : C * (gf - 1) / g;
+  return fv;
+}
+
 function projectAt(list, years) {
   let v = 0;
-  for (const it of list) v += it.value * Math.pow(1 + (it.growth || 0) / 100, years);
+  for (const it of list) v += projectItemAt(it, years);
   return v;
 }
 
@@ -489,6 +522,23 @@ function updateForecastOutputs() {
     ? `At these assumptions you'd cross ${money(ms.target)} in about ` +
       `${ms.years.toFixed(1)} years (${Math.round(thisYear + ms.years)}).`
     : `${money(ms.target)} stays out of reach within 50 years at these assumptions.`;
+
+  /* savings-rate summary */
+  const summary = document.getElementById("contrib-summary");
+  const annual = state.items.reduce((a, it) => a + annualContrib(it), 0);
+  const funded = state.items.filter((it) => annualContrib(it) !== 0).length;
+  if (annual === 0) {
+    summary.textContent = "No contributions set yet — add amounts below to fold " +
+      "regular saving into the forecast.";
+  } else {
+    const invested = state.items
+      .filter((it) => annualContrib(it) > 0)
+      .reduce((a, it) => a + annualContrib(it) * H, 0);
+    summary.textContent =
+      `You're contributing ${money(annual / 12)}/mo (${money(annual)}/yr) across ` +
+      `${funded} account${funded === 1 ? "" : "s"} — about ${money(invested)} deposited ` +
+      `over ${H} year${H > 1 ? "s" : ""}, before any growth.`;
+  }
 
   /* what-if results */
   const res = document.getElementById("whatif-results");
@@ -712,6 +762,52 @@ function renderGrowthList() {
     pct.textContent = "%/yr";
 
     row.append(name, val, input, pct);
+    el.append(row);
+  }
+}
+
+/* contributions list: amount + cadence per entry */
+function renderContribList() {
+  const el = document.getElementById("contrib-list");
+  el.innerHTML = "";
+  const items = [...state.items].sort((a, b) => {
+    const ca = annualContrib(a), cb = annualContrib(b);
+    if ((cb !== 0) - (ca !== 0)) return (cb !== 0) - (ca !== 0); // funded first
+    return Math.abs(b.value) - Math.abs(a.value);
+  });
+  for (const it of items) {
+    const row = document.createElement("div");
+    row.className = "contrib-row";
+
+    const name = document.createElement("span");
+    name.className = "c-name";
+    name.textContent = it.name;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.value = it.contrib ? it.contrib : "";
+    input.placeholder = "0";
+    input.setAttribute("aria-label", `Contribution amount for ${it.name}`);
+
+    const sel = document.createElement("select");
+    fillSelect(sel, FREQS.map(([k]) => [k, k]), it.contribFreq || "monthly");
+    sel.setAttribute("aria-label", `Contribution frequency for ${it.name}`);
+
+    input.addEventListener("change", () => {
+      const c = parseFloat(String(input.value).replace(/[$,\s]/g, ""));
+      it.contrib = Number.isFinite(c) ? c : 0;
+      input.value = it.contrib ? it.contrib : "";
+      persist();
+      updateForecastOutputs();
+    });
+    sel.addEventListener("change", () => {
+      it.contribFreq = sel.value;
+      persist();
+      updateForecastOutputs();
+    });
+
+    row.append(name, input, sel);
     el.append(row);
   }
 }
@@ -1185,6 +1281,8 @@ function openItemDialog(id) {
   itemForm.elements.liquidity.value = it ? it.liquidity : "liquid";
   itemForm.elements.role.value = it ? it.role : "";
   itemForm.elements.growth.value = it ? it.growth : "";
+  itemForm.elements.contrib.value = it && it.contrib ? it.contrib : "";
+  itemForm.elements.contribFreq.value = it && it.contribFreq ? it.contribFreq : "monthly";
 
   itemDialog.showModal();
 }
@@ -1210,6 +1308,7 @@ itemForm.addEventListener("submit", (e) => {
     return;
   }
   const growth = parseFloat(String(itemForm.elements.growth.value).replace(/[%\s]/g, ""));
+  const contrib = parseFloat(String(itemForm.elements.contrib.value).replace(/[$,\s]/g, ""));
   const data = {
     name: itemForm.elements.name.value.trim(),
     value,
@@ -1218,6 +1317,8 @@ itemForm.addEventListener("submit", (e) => {
     liquidity: itemForm.elements.liquidity.value,
     role: itemForm.elements.role.value,
     growth: Number.isFinite(growth) ? growth : 0,
+    contrib: Number.isFinite(contrib) ? contrib : 0,
+    contribFreq: itemForm.elements.contribFreq.value,
   };
   if (!data.name) { e.preventDefault(); return; }
   if (editingId) {
@@ -1276,6 +1377,7 @@ function renderAll() {
   renderLedger();
   renderInsights();
   renderForecast();
+  renderContribList();
   renderGrowthList();
   renderHistory();
   renderSettings();

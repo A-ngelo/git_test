@@ -435,6 +435,45 @@ em { font-style: normal; }
 }
 .growth-row input:focus { outline: none; border-color: var(--ink-soft); }
 
+.contrib-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  border-bottom: 1px dotted var(--hairline-soft);
+  padding: .3rem 0;
+}
+.contrib-row .c-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contrib-row input {
+  width: 5rem;
+  padding: .25rem .4rem;
+  font-family: inherit;
+  font-size: .95rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  text-align: right;
+}
+.contrib-row select {
+  padding: .25rem .3rem;
+  font-family: inherit;
+  font-size: .85rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+.contrib-row input:focus, .contrib-row select:focus {
+  outline: none;
+  border-color: var(--ink-soft);
+}
+
 /* ── History / chart ────────────────────────────────────────── */
 
 .chart-wrap {
