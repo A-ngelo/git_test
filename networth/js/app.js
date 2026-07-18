@@ -71,12 +71,16 @@ function seedState() {
       retirementPct: 60,
       defiApr: 4.0,
       defiStables: 16600,
+      withdrawalRate: 4.0,
+      monthlyIncome: 0,
     },
     owners: ["Angelo", "Brenna", "Joint"],
     categories: cats,
     items,
     snapshots: [],
     forecast: { horizon: 10 },
+    expenses: seedExpenses(),
+    expensesView: { start: "", end: "", account: "", basis: "full" },
   };
 
   const t = totals(state);
@@ -87,6 +91,60 @@ function seedState() {
     netWorth: t.net, assets: t.assets, debts: t.debts,
   });
   return state;
+}
+
+/* Expenses imported from the Lifestyle Budget spreadsheet.
+   amount is per-occurrence; freq normalizes to a monthly cost.
+   when = day-of-month (monthly/yearly) or weekday 0–6 Sun–Sat (weekly).
+   type: necessity | discretionary | savings. */
+function seedExpenses() {
+  // [name, amount, freq, when, account, owner, type]
+  const rows = [
+    ["Juno's Future Fund (Betterment)", 100, "weekly",  5, "DCU",      "Angelo", "savings"],
+    ["M1",                              100, "weekly",  5, "DCU",      "Angelo", "savings"],
+    ["Betterment Brokerage",           100, "weekly",  5, "DCU",      "Angelo", "savings"],
+    ["Lorelei's Future Account",        75, "weekly",  5, "DCU",      "Angelo", "savings"],
+    ["Mortgage",                      2736, "monthly", 1, "DCU",      "Angelo", "necessity"],
+    ["National Grid",                  384, "monthly", 1, "DCU",      "Angelo", "necessity"],
+    ["HELOC Payment",                  318, "monthly", 6, "DCU",      "Angelo", "necessity"],
+    ["Progressive",                    180, "monthly", 18, "DCU",     "Angelo", "necessity"],
+    ["Oil",                            140, "monthly", null, "ether.fi", "Angelo", "necessity"],
+    ["Propane",                        110, "monthly", null, "ether.fi", "Angelo", "necessity"],
+    ["Verizon Internet + Disney+",      76, "monthly", 31, "ether.fi", "Angelo", "necessity"],
+    ["Mint Mobile",                     66, "monthly", null, "ether.fi", "Angelo", "necessity"],
+    ["AAA Life",                        34, "monthly", null, "ether.fi", "Angelo", "necessity"],
+    ["Coinbase One",                    30, "monthly", null, "Coinbase CC", "Angelo", "discretionary"],
+    ["CC Annual Fees",                  24, "monthly", null, "", "Angelo", "discretionary"],
+    ["Claude",                          21, "monthly", null, "", "Angelo", "discretionary"],
+    ["X Premium",                       11, "monthly", null, "", "Angelo", "discretionary"],
+    ["Netflix",                         18, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Spotify",                         17, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["AAA Coverage",                    17, "monthly", null, "ether.fi", "Angelo", "necessity"],
+    ["Max",                             19, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Amazon Prime",                    12, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Lightroom",                       11, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Crunchyroll",                      8, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Paramount+",                       8, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Amazon Kids",                      7, "monthly", null, "", "Angelo", "discretionary"],
+    ["Trash bags (Amazon)",              5, "monthly", null, "ether.fi", "Angelo", "necessity"],
+    ["Ring Doorbell",                    5, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Disney Duo (Hulu)",                1, "monthly", null, "ether.fi", "Angelo", "discretionary"],
+    ["Groceries",                      900, "monthly", null, "", "Brenna", "necessity"],
+    ["Euro School Trip",               771, "monthly", null, "", "Brenna", "discretionary"],
+    ["Betterment",                     400, "monthly", null, "", "Brenna", "savings"],
+    ["AlphaBEST",                      150, "monthly", null, "", "Brenna", "necessity"],
+    ["GLP",                            299, "monthly", null, "", "Brenna", "necessity"],
+    ["Donna's Health Insurance",       283, "monthly", null, "", "Brenna", "necessity"],
+    ["Gymnastics",                     125, "monthly", null, "", "Brenna", "discretionary"],
+    ["Water Bill",                      76, "monthly", null, "", "Brenna", "necessity"],
+    ["iStorage",                        60, "monthly", null, "", "Brenna", "discretionary"],
+    ["Gutters",                         25, "monthly", null, "", "Brenna", "necessity"],
+    ["NY Times",                         6, "monthly", null, "", "Brenna", "discretionary"],
+    ["Sword Scale Sub",                 10, "monthly", null, "", "Brenna", "discretionary"],
+  ];
+  return rows.map(([name, amount, freq, when, account, owner, type], i) => ({
+    id: "exp-" + i, name, amount, freq, when, account, owner, type,
+  }));
 }
 
 /* starting-point growth guesses (% per year); every entry is editable */
@@ -120,6 +178,10 @@ function load() {
           if (!it.contribFreq) { it.contribFreq = "monthly"; migrated = true; }
         }
         if (!s.forecast) { s.forecast = { horizon: 10 }; migrated = true; }
+        if (!Array.isArray(s.expenses)) { s.expenses = seedExpenses(); migrated = true; }
+        if (!s.expensesView) { s.expensesView = { start: "", end: "", account: "", basis: "full" }; migrated = true; }
+        if (typeof s.settings.withdrawalRate !== "number") { s.settings.withdrawalRate = 4.0; migrated = true; }
+        if (typeof s.settings.monthlyIncome !== "number") { s.settings.monthlyIncome = 0; migrated = true; }
         if (migrated) persist(s);
         return s;
       }
