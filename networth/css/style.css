@@ -554,6 +554,32 @@ em { font-style: normal; }
   margin-bottom: .5rem;
 }
 
+.retire-picker { margin-bottom: .5rem; }
+.retire-picker > summary {
+  cursor: pointer;
+  font-size: .82rem;
+  letter-spacing: .04em;
+  color: var(--ink-soft);
+  padding: .35rem 0;
+}
+.retire-picker > summary:hover { color: var(--ink); }
+.retire-pick-row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  border-bottom: 1px dotted var(--hairline-soft);
+  padding: .35rem 0;
+  cursor: pointer;
+}
+.retire-pick-row input { flex: 0 0 auto; accent-color: var(--ink); width: 1rem; height: 1rem; }
+.retire-pick-row .rp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.retire-pick-row .rp-val {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  font-size: .82rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .expense-row {
   display: flex;
   align-items: center;

@@ -60,6 +60,7 @@ function seedState() {
     it.growth = defaultGrowth(it);
     it.contrib = 0;              // amount per period; you fill these in
     it.contribFreq = "monthly"; // used only when contrib > 0
+    it.retirement = defaultRetirement(it);
   });
 
   const state = {
@@ -147,6 +148,15 @@ function seedExpenses() {
   }));
 }
 
+/* default retirement eligibility: growth assets, but not your home (you
+   live in it) and not 529 college funds. Everything is toggleable. */
+function defaultRetirement(it) {
+  if (!(it.value > 0) || it.categoryId === "vehicles") return false;
+  if (it.role === "property") return false;
+  if (/\b529\b|college|future (fund|account)/i.test(it.name)) return false;
+  return true;
+}
+
 /* starting-point growth guesses (% per year); every entry is editable */
 function defaultGrowth(it) {
   if (it.role === "property") return 3;
@@ -176,6 +186,7 @@ function load() {
           if (typeof it.growth !== "number") { it.growth = defaultGrowth(it); migrated = true; }
           if (typeof it.contrib !== "number") { it.contrib = 0; migrated = true; }
           if (!it.contribFreq) { it.contribFreq = "monthly"; migrated = true; }
+          if (typeof it.retirement !== "boolean") { it.retirement = defaultRetirement(it); migrated = true; }
         }
         if (!s.forecast) { s.forecast = { horizon: 10 }; migrated = true; }
         if (!Array.isArray(s.expenses)) { s.expenses = seedExpenses(); migrated = true; }
@@ -992,6 +1003,7 @@ function renderExpenses() {
   document.getElementById("exp-income").value = state.settings.monthlyIncome || "";
   renderCashflow();
   renderExpenseSummary();
+  renderRetirePicker();
   renderRetirement();
   renderExpenseList();
 }
@@ -1111,8 +1123,11 @@ function renderExpenseSummary() {
 }
 
 /* ── retirement ── */
-function yearsToReach(target) {
-  const list = forecastItems();
+function retirementItems() {
+  return state.items.filter((it) => it.retirement && isForecastable(it));
+}
+
+function yearsToReach(target, list) {
   if (projectAt(list, 0) >= target) return 0;
   for (let mth = 1; mth <= 600; mth++) if (projectAt(list, mth / 12) >= target) return mth / 12;
   return null;
@@ -1127,27 +1142,28 @@ function renderRetirement() {
   const lean = swr > 0 ? (leanMo * 12) / swr : 0;
   const full = swr > 0 ? (fullMo * 12) / swr : 0;
   const multiple = swr > 0 ? 1 / swr : 0;
-  const growthAssets = forecastItems().reduce((a, it) => a + it.value, 0);
+  const retList = retirementItems();
+  const retAssets = retList.reduce((a, it) => a + it.value, 0);
   const thisYear = new Date().getFullYear();
 
   const target = state.expensesView.basis === "lean" ? lean : full;
   const targetMo = state.expensesView.basis === "lean" ? leanMo : fullMo;
-  const pct = target > 0 ? Math.min(1, growthAssets / target) : 0;
-  const yrs = yearsToReach(target);
+  const pct = target > 0 ? Math.min(1, retAssets / target) : 0;
+  const yrs = yearsToReach(target, retList);
 
   let html = `<p class="fine-print">A ${state.settings.withdrawalRate}% withdrawal rate means your
   nest egg needs to be about <strong>${multiple.toFixed(0)}×</strong> your yearly expenses.
   Savings contributions are excluded (you stop saving once retired). Progress and years-to-reach
-  use your growth-asset forecast.</p>`;
+  use only the assets you mark below.</p>`;
 
   html += `<div class="insight-grid">`;
   html += tile("Lean number", money(lean), `covers necessities (${money(leanMo)}/mo)`);
   html += tile("Full number", money(full), `necessities + discretionary (${money(fullMo)}/mo)`);
-  html += tile("Growth assets now", money(growthAssets), pctLabel(pct) + " of the " +
+  html += tile("Retirement assets", money(retAssets), pctLabel(pct) + " of the " +
     (state.expensesView.basis === "lean" ? "lean" : "full") + " number");
   html += tile(yrs === null ? "Years to target" : "On track for",
     yrs === null ? "50+ yrs" : (yrs === 0 ? "there now" : `${Math.round(thisYear + yrs)}`),
-    yrs === null ? "raise growth or contributions" :
+    yrs === null ? "add assets, growth or contributions" :
       (yrs === 0 ? "already funded" : `about ${yrs.toFixed(1)} years out`));
   html += `</div>`;
 
@@ -1157,11 +1173,48 @@ function renderRetirement() {
   const bar = document.getElementById("retire-progress");
   bar.style.width = (pct * 100).toFixed(1) + "%";
   document.getElementById("retire-progress-cap").textContent =
-    `${money(growthAssets)} of ${money(target)} (${(pct * 100).toFixed(0)}%) toward retiring on ` +
+    `${money(retAssets)} of ${money(target)} (${(pct * 100).toFixed(0)}%) toward retiring on ` +
     `${money(targetMo)}/mo`;
+
+  updateRetireSummary();
 }
 
 function pctLabel(p) { return (p * 100).toFixed(0) + "%"; }
+
+function updateRetireSummary() {
+  const all = forecastItems();
+  const sel = all.filter((it) => it.retirement).length;
+  const sum = document.querySelector("#retire-picker > summary");
+  if (sum) sum.textContent = `Choose which assets fund retirement (${sel} of ${all.length})`;
+}
+
+/* checklist of growth assets to include in the retirement picture */
+function renderRetirePicker() {
+  const el = document.getElementById("retire-assets");
+  el.innerHTML = "";
+  const items = forecastItems().sort((a, b) => b.value - a.value);
+  for (const it of items) {
+    const row = document.createElement("label");
+    row.className = "retire-pick-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!it.retirement;
+    cb.addEventListener("change", () => {
+      it.retirement = cb.checked;
+      persist();
+      renderRetirement();
+    });
+    const name = document.createElement("span");
+    name.className = "rp-name";
+    name.textContent = it.name;
+    const val = document.createElement("span");
+    val.className = "rp-val";
+    val.textContent = money(it.value);
+    row.append(cb, name, val);
+    el.append(row);
+  }
+  updateRetireSummary();
+}
 
 /* ── expense list ── */
 function renderExpenseList() {
