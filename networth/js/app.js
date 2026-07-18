@@ -905,6 +905,422 @@ document.getElementById("wi-to").addEventListener("change", (e) => {
   updateForecastOutputs();
 });
 
+/* ── Expenses tab ───────────────────────────────────────────── */
+
+const EXP_FREQS = [
+  ["weekly",   "Weekly",        52 / 12],
+  ["biweekly", "Every 2 weeks", 26 / 12],
+  ["monthly",  "Monthly",       1],
+  ["yearly",   "Yearly",        1 / 12],
+];
+const EXP_PER_MONTH = Object.fromEntries(EXP_FREQS.map(([k, , n]) => [k, n]));
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const EXP_TYPES = [
+  ["necessity", "Necessity"],
+  ["discretionary", "Discretionary"],
+  ["savings", "Savings"],
+];
+
+function expMonthly(e) {
+  return (e.amount || 0) * (EXP_PER_MONTH[e.freq] ?? 1);
+}
+
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function expTiming(e) {
+  if (e.freq === "weekly") return e.when != null ? WEEKDAYS[e.when] + "s" : "Weekly";
+  if (e.freq === "biweekly") return e.when != null ? "Every other " + WEEKDAYS[e.when] : "Every 2 weeks";
+  if (e.freq === "yearly") return e.when ? "Yearly, " + ordinal(e.when) : "Yearly";
+  return e.when ? "Monthly, " + ordinal(e.when) : "Monthly";
+}
+
+function parseLocalDate(str) {
+  if (!str) return null;
+  const d = new Date(str + "T12:00:00");
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/* dated occurrences of one expense within [start, end] inclusive (Date objs) */
+function expenseOccurrences(e, start, end) {
+  const out = [];
+  if (!start || !end || end < start) return out;
+  if (e.freq === "weekly") {
+    if (e.when == null) return out;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1))
+      if (d.getDay() === Number(e.when)) out.push({ date: new Date(d), amount: e.amount });
+  } else if (e.freq === "biweekly") {
+    if (e.when == null) return out;
+    let n = 0;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1))
+      if (d.getDay() === Number(e.when)) { if (n % 2 === 0) out.push({ date: new Date(d), amount: e.amount }); n++; }
+  } else if (e.freq === "monthly") {
+    if (!e.when) return out;
+    let y = start.getFullYear(), m = start.getMonth();
+    while (true) {
+      const dim = new Date(y, m + 1, 0).getDate();
+      const dt = new Date(y, m, Math.min(e.when, dim), 12);
+      if (dt > end) break;
+      if (dt >= start) out.push({ date: dt, amount: e.amount });
+      m++; if (m > 11) { m = 0; y++; }
+    }
+  }
+  // yearly has no month stored → not placed in a cash-flow window
+  return out;
+}
+
+function expenseAccounts() {
+  const set = new Set();
+  for (const e of state.expenses) if (e.account && e.account.trim()) set.add(e.account.trim());
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+const fmtDate = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
+
+function renderExpenses() {
+  const dl = document.getElementById("account-suggestions");
+  dl.innerHTML = "";
+  for (const a of expenseAccounts()) {
+    const o = document.createElement("option");
+    o.value = a;
+    dl.append(o);
+  }
+  document.getElementById("retire-swr").value = state.settings.withdrawalRate;
+  document.getElementById("retire-basis").value = state.expensesView.basis || "full";
+  document.getElementById("exp-income").value = state.settings.monthlyIncome || "";
+  renderCashflow();
+  renderExpenseSummary();
+  renderRetirement();
+  renderExpenseList();
+}
+
+/* ── cash-flow window planner ── */
+function renderCashflow() {
+  const v = state.expensesView;
+  const startEl = document.getElementById("cf-start");
+  const endEl = document.getElementById("cf-end");
+  const acctEl = document.getElementById("cf-account");
+
+  if (!v.start || !v.end) {
+    const today = new Date();
+    const plus14 = new Date(); plus14.setDate(today.getDate() + 14);
+    v.start = v.start || today.toISOString().slice(0, 10);
+    v.end = v.end || plus14.toISOString().slice(0, 10);
+  }
+  startEl.value = v.start;
+  endEl.value = v.end;
+  fillSelect(acctEl, [["", "All accounts"]].concat(expenseAccounts().map((a) => [a, a])), v.account);
+
+  updateCashflow();
+}
+
+function updateCashflow() {
+  const v = state.expensesView;
+  const start = parseLocalDate(v.start);
+  const end = parseLocalDate(v.end);
+  const out = document.getElementById("cashflow-results");
+
+  if (!start || !end || end < start) {
+    out.innerHTML = `<p class="empty-note">Pick a start date and a later end date.</p>`;
+    return;
+  }
+
+  const rows = [];
+  const byAccount = {};
+  for (const e of state.expenses) {
+    if (v.account && (e.account || "") !== v.account) continue;
+    for (const occ of expenseOccurrences(e, start, end)) {
+      rows.push({ date: occ.date, name: e.name, account: e.account || "—", amount: occ.amount });
+      const key = e.account || "—";
+      byAccount[key] = (byAccount[key] || 0) + occ.amount;
+    }
+  }
+  rows.sort((a, b) => a.date - b.date);
+  const total = rows.reduce((a, r) => a + r.amount, 0);
+
+  const days = Math.round((end - start) / 86400000) + 1;
+  const acctLabel = v.account ? v.account : "all accounts";
+
+  let html = `<div class="cashflow-headline">
+    <span class="cf-total">${money(total)}</span>
+    <span class="cf-cap">to cover from ${esc(fmtDate.format(start))} through
+    ${esc(fmtDate.format(end))} (${days} days) in <strong>${esc(acctLabel)}</strong></span>
+  </div>`;
+
+  if (!v.account && Object.keys(byAccount).length > 1) {
+    html += `<div class="insight-grid">`;
+    for (const [acct, amt] of Object.entries(byAccount).sort((a, b) => b[1] - a[1]))
+      html += tile(acct, money(amt), "keep this in " + acct);
+    html += `</div>`;
+  }
+
+  if (!rows.length) {
+    html += `<p class="empty-note">Nothing scheduled falls in this window.
+    (Undated expenses aren't placed on the calendar — give them a day to see them here.)</p>`;
+  } else {
+    html += `<table class="snap-table"><thead><tr>
+      <th scope="col">Date</th><th scope="col">Expense</th>
+      <th scope="col">Account</th><th scope="col">Amount</th></tr></thead><tbody>`;
+    for (const r of rows) {
+      html += `<tr><td>${esc(fmtDate.format(r.date))}</td><td>${esc(r.name)}</td>` +
+        `<td>${esc(r.account)}</td><td class="num">${esc(money(r.amount))}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+  out.innerHTML = html;
+}
+
+/* ── monthly summary ── */
+function expenseTotalsByType() {
+  const by = { necessity: 0, discretionary: 0, savings: 0 };
+  for (const e of state.expenses) by[e.type] = (by[e.type] || 0) + expMonthly(e);
+  return by;
+}
+
+function renderExpenseSummary() {
+  const el = document.getElementById("expense-summary");
+  const by = expenseTotalsByType();
+  const total = by.necessity + by.discretionary + by.savings;
+  const income = state.settings.monthlyIncome || 0;
+
+  let html = `<div class="insight-grid">`;
+  html += tile("Total / month", money(total), money(total * 12) + " per year");
+  html += tile("Necessities", money(by.necessity));
+  html += tile("Discretionary", money(by.discretionary));
+  html += tile("Savings", money(by.savings), "contributions out");
+  if (income > 0) {
+    const surplus = income - total;
+    html += tile("Take-home / month", money(income));
+    html += tile(surplus < 0 ? "Shortfall" : "Left over", (surplus < 0 ? "− " : "") + moneyAbs(surplus),
+      surplus < 0 ? "spending exceeds income" : "after everything above");
+  }
+  html += `</div>`;
+
+  const owners = [...new Set(state.expenses.map((e) => e.owner))];
+  if (owners.length > 1) {
+    html += `<h2 class="section-label">By owner</h2><div class="insight-grid">`;
+    for (const o of owners) {
+      const sum = state.expenses.filter((e) => e.owner === o).reduce((a, e) => a + expMonthly(e), 0);
+      html += tile(o, money(sum) + "/mo");
+    }
+    html += `</div>`;
+  }
+  el.innerHTML = html;
+}
+
+/* ── retirement ── */
+function yearsToReach(target) {
+  const list = forecastItems();
+  if (projectAt(list, 0) >= target) return 0;
+  for (let mth = 1; mth <= 600; mth++) if (projectAt(list, mth / 12) >= target) return mth / 12;
+  return null;
+}
+
+function renderRetirement() {
+  const el = document.getElementById("retirement-body");
+  const swr = (state.settings.withdrawalRate || 4) / 100;
+  const by = expenseTotalsByType();
+  const leanMo = by.necessity;
+  const fullMo = by.necessity + by.discretionary;
+  const lean = swr > 0 ? (leanMo * 12) / swr : 0;
+  const full = swr > 0 ? (fullMo * 12) / swr : 0;
+  const multiple = swr > 0 ? 1 / swr : 0;
+  const growthAssets = forecastItems().reduce((a, it) => a + it.value, 0);
+  const thisYear = new Date().getFullYear();
+
+  const target = state.expensesView.basis === "lean" ? lean : full;
+  const targetMo = state.expensesView.basis === "lean" ? leanMo : fullMo;
+  const pct = target > 0 ? Math.min(1, growthAssets / target) : 0;
+  const yrs = yearsToReach(target);
+
+  let html = `<p class="fine-print">A ${state.settings.withdrawalRate}% withdrawal rate means your
+  nest egg needs to be about <strong>${multiple.toFixed(0)}×</strong> your yearly expenses.
+  Savings contributions are excluded (you stop saving once retired). Progress and years-to-reach
+  use your growth-asset forecast.</p>`;
+
+  html += `<div class="insight-grid">`;
+  html += tile("Lean number", money(lean), `covers necessities (${money(leanMo)}/mo)`);
+  html += tile("Full number", money(full), `necessities + discretionary (${money(fullMo)}/mo)`);
+  html += tile("Growth assets now", money(growthAssets), pctLabel(pct) + " of the " +
+    (state.expensesView.basis === "lean" ? "lean" : "full") + " number");
+  html += tile(yrs === null ? "Years to target" : "On track for",
+    yrs === null ? "50+ yrs" : (yrs === 0 ? "there now" : `${Math.round(thisYear + yrs)}`),
+    yrs === null ? "raise growth or contributions" :
+      (yrs === 0 ? "already funded" : `about ${yrs.toFixed(1)} years out`));
+  html += `</div>`;
+
+  el.innerHTML = html;
+
+  /* progress bar toward the selected basis */
+  const bar = document.getElementById("retire-progress");
+  bar.style.width = (pct * 100).toFixed(1) + "%";
+  document.getElementById("retire-progress-cap").textContent =
+    `${money(growthAssets)} of ${money(target)} (${(pct * 100).toFixed(0)}%) toward retiring on ` +
+    `${money(targetMo)}/mo`;
+}
+
+function pctLabel(p) { return (p * 100).toFixed(0) + "%"; }
+
+/* ── expense list ── */
+function renderExpenseList() {
+  const el = document.getElementById("expense-list");
+  el.innerHTML = "";
+  if (!state.expenses.length) {
+    el.innerHTML = `<p class="empty-note">No expenses yet. Add one above.</p>`;
+    return;
+  }
+  const owners = [...new Set(state.expenses.map((e) => e.owner))];
+  for (const owner of owners) {
+    const items = state.expenses
+      .filter((e) => e.owner === owner)
+      .sort((a, b) => expMonthly(b) - expMonthly(a));
+    if (!items.length) continue;
+
+    const group = document.createElement("section");
+    group.className = "ledger-group";
+    const head = document.createElement("div");
+    head.className = "ledger-group-head";
+    const h2 = document.createElement("h2");
+    h2.textContent = owner;
+    const total = document.createElement("span");
+    total.className = "group-total";
+    total.textContent = money(items.reduce((a, e) => a + expMonthly(e), 0)) + "/mo";
+    head.append(h2, total);
+    group.append(head);
+
+    for (const e of items) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "expense-row";
+      row.title = "Edit " + e.name;
+
+      const main = document.createElement("span");
+      main.className = "exp-main";
+      const nm = document.createElement("span");
+      nm.className = "exp-name";
+      nm.textContent = e.name;
+      const meta = document.createElement("span");
+      meta.className = "exp-meta";
+      meta.textContent = [expTiming(e), e.account].filter(Boolean).join(" · ");
+      main.append(nm, meta);
+
+      const badge = document.createElement("span");
+      badge.className = "exp-type exp-type-" + e.type;
+      badge.textContent = e.type[0].toUpperCase();
+      badge.title = e.type;
+
+      const amt = document.createElement("span");
+      amt.className = "exp-amt";
+      amt.textContent = money(expMonthly(e)) + "/mo";
+
+      row.append(main, badge, amt);
+      row.addEventListener("click", () => openExpenseDialog(e.id));
+      group.append(row);
+    }
+    el.append(group);
+  }
+}
+
+/* ── cash-flow + retirement controls (static elements, wired once) ── */
+document.getElementById("cf-start").addEventListener("change", (e) => {
+  state.expensesView.start = e.target.value; persist(); updateCashflow();
+});
+document.getElementById("cf-end").addEventListener("change", (e) => {
+  state.expensesView.end = e.target.value; persist(); updateCashflow();
+});
+document.getElementById("cf-account").addEventListener("change", (e) => {
+  state.expensesView.account = e.target.value; persist(); updateCashflow();
+});
+document.getElementById("retire-basis").addEventListener("change", (e) => {
+  state.expensesView.basis = e.target.value; persist(); renderRetirement();
+});
+document.getElementById("retire-swr").addEventListener("change", (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v > 0) { state.settings.withdrawalRate = v; persist(); renderRetirement(); }
+  else e.target.value = state.settings.withdrawalRate;
+});
+document.getElementById("exp-income").addEventListener("change", (e) => {
+  const v = parseFloat(String(e.target.value).replace(/[$,\s]/g, ""));
+  state.settings.monthlyIncome = Number.isFinite(v) ? v : 0;
+  persist(); renderExpenseSummary();
+});
+
+/* ── expense dialog ── */
+const expenseDialog = document.getElementById("expense-dialog");
+const expenseForm = document.getElementById("expense-form");
+let editingExpenseId = null;
+
+function syncWhenField() {
+  const freq = expenseForm.elements.freq.value;
+  const weekly = freq === "weekly" || freq === "biweekly";
+  document.getElementById("exp-when-weekday").hidden = !weekly;
+  document.getElementById("exp-when-day").hidden = weekly;
+}
+
+function openExpenseDialog(id) {
+  editingExpenseId = id;
+  const e = id ? state.expenses.find((x) => x.id === id) : null;
+  document.getElementById("expense-dialog-title").textContent = e ? "Edit expense" : "New expense";
+  document.getElementById("expense-delete-btn").style.visibility = e ? "visible" : "hidden";
+
+  expenseForm.elements.name.value = e ? e.name : "";
+  expenseForm.elements.amount.value = e ? e.amount : "";
+  expenseForm.elements.freq.value = e ? e.freq : "monthly";
+  expenseForm.elements.type.value = e ? e.type : "necessity";
+  fillSelect(expenseForm.elements.owner, state.owners.map((o) => [o, o]), e ? e.owner : state.owners[0]);
+  fillSelect(expenseForm.elements.weekday,
+    WEEKDAYS.map((w, i) => [String(i), w]), e && (e.freq === "weekly" || e.freq === "biweekly") ? String(e.when ?? 5) : "5");
+  expenseForm.elements.dayOfMonth.value =
+    e && e.freq !== "weekly" && e.freq !== "biweekly" && e.when ? e.when : "";
+  expenseForm.elements.account.value = e ? (e.account || "") : "";
+  syncWhenField();
+  expenseDialog.showModal();
+}
+
+expenseForm.elements.freq.addEventListener("change", syncWhenField);
+document.getElementById("add-expense-btn").addEventListener("click", () => openExpenseDialog(null));
+document.getElementById("expense-cancel-btn").addEventListener("click", () => expenseDialog.close());
+
+document.getElementById("expense-delete-btn").addEventListener("click", () => {
+  const e = state.expenses.find((x) => x.id === editingExpenseId);
+  if (!e) return;
+  if (!confirm(`Remove "${e.name}" from expenses?`)) return;
+  state.expenses = state.expenses.filter((x) => x.id !== editingExpenseId);
+  persist();
+  expenseDialog.close();
+  renderExpenses();
+});
+
+expenseForm.addEventListener("submit", (ev) => {
+  const amount = parseFloat(String(expenseForm.elements.amount.value).replace(/[$,\s]/g, ""));
+  const name = expenseForm.elements.name.value.trim();
+  if (!name || !Number.isFinite(amount)) { ev.preventDefault(); return; }
+  const freq = expenseForm.elements.freq.value;
+  const weekly = freq === "weekly" || freq === "biweekly";
+  let when;
+  if (weekly) {
+    when = Number(expenseForm.elements.weekday.value);
+  } else {
+    const d = parseInt(expenseForm.elements.dayOfMonth.value, 10);
+    when = Number.isFinite(d) && d >= 1 && d <= 31 ? d : null;
+  }
+  const data = {
+    name, amount, freq, when,
+    type: expenseForm.elements.type.value,
+    owner: expenseForm.elements.owner.value,
+    account: expenseForm.elements.account.value.trim(),
+  };
+  if (editingExpenseId) {
+    Object.assign(state.expenses.find((x) => x.id === editingExpenseId), data);
+  } else {
+    state.expenses.push({ id: uid(), ...data });
+  }
+  persist();
+  renderExpenses();
+});
+
 /* ── History tab ────────────────────────────────────────────── */
 
 function renderHistory() {
@@ -1457,6 +1873,7 @@ function renderAll() {
   renderForecast();
   renderContribList();
   renderGrowthList();
+  renderExpenses();
   renderHistory();
   renderSettings();
 }
