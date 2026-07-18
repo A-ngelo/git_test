@@ -43,6 +43,7 @@
     <button role="tab" data-tab="ledger" aria-selected="true">Ledger</button>
     <button role="tab" data-tab="insights" aria-selected="false">Insights</button>
     <button role="tab" data-tab="forecast" aria-selected="false">Forecast</button>
+    <button role="tab" data-tab="expenses" aria-selected="false">Expenses</button>
     <button role="tab" data-tab="history" aria-selected="false">History</button>
     <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
   </nav>
@@ -106,6 +107,56 @@
     use negative numbers for things that lose value (cars) or debts being paid down.
     A simple compound model; edit freely, it drives everything above.</p>
     <div id="growth-list"></div>
+  </main>
+
+  <!-- ═══════════ EXPENSES ═══════════ -->
+  <main id="tab-expenses" class="tab-panel" role="tabpanel" hidden>
+    <h2 class="section-label">Pay-period window</h2>
+    <p class="fine-print">Set a window from one payday to the next to see the total
+    of scheduled auto-pays that will hit an account &mdash; so you know how much to
+    keep there (and what you can waterfall elsewhere).</p>
+    <div class="cashflow-controls">
+      <label>From
+        <input type="date" id="cf-start">
+      </label>
+      <label>To
+        <input type="date" id="cf-end">
+      </label>
+      <label>Account
+        <select id="cf-account"></select>
+      </label>
+    </div>
+    <div id="cashflow-results"></div>
+
+    <h2 class="section-label">Monthly picture</h2>
+    <div class="income-row">
+      <label>Take-home / month <span class="muted">(optional, for surplus)</span>
+        <input type="text" id="exp-income" inputmode="decimal" autocomplete="off" placeholder="e.g. 13900">
+      </label>
+    </div>
+    <div id="expense-summary"></div>
+
+    <h2 class="section-label">Retirement number</h2>
+    <div class="retire-controls">
+      <label>Withdrawal rate (%)
+        <input type="number" id="retire-swr" min="1" max="20" step="0.1">
+      </label>
+      <label>Progress toward
+        <select id="retire-basis">
+          <option value="full">Full (necessities + discretionary)</option>
+          <option value="lean">Lean (necessities only)</option>
+        </select>
+      </label>
+    </div>
+    <div id="retirement-body"></div>
+    <div class="progress-track retire-track" aria-hidden="true"><div class="progress-fill" id="retire-progress"></div></div>
+    <p class="progress-caption" id="retire-progress-cap"></p>
+
+    <h2 class="section-label">All expenses</h2>
+    <div class="panel-actions">
+      <button class="btn" id="add-expense-btn">+ Add expense</button>
+    </div>
+    <div id="expense-list"></div>
   </main>
 
   <!-- ═══════════ HISTORY ═══════════ -->
@@ -226,6 +277,67 @@
       <button type="button" class="btn btn-danger" id="item-delete-btn">Delete</button>
       <span class="spacer"></span>
       <button type="button" class="btn" id="item-cancel-btn">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══════════ EXPENSE EDITOR ═══════════ -->
+<dialog id="expense-dialog">
+  <form method="dialog" id="expense-form">
+    <h2 id="expense-dialog-title">Edit expense</h2>
+
+    <label>Name
+      <input type="text" name="name" required autocomplete="off">
+    </label>
+
+    <div class="form-row">
+      <label>Amount ($)
+        <input type="text" name="amount" inputmode="decimal" required autocomplete="off" placeholder="per occurrence">
+      </label>
+      <label>Frequency
+        <select name="freq">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label id="exp-when-day">Day of month <span class="muted">(1–31, optional)</span>
+        <input type="number" name="dayOfMonth" min="1" max="31" step="1" autocomplete="off" placeholder="e.g. 15">
+      </label>
+      <label id="exp-when-weekday">Weekday
+        <select name="weekday"></select>
+      </label>
+      <label>Type
+        <select name="type">
+          <option value="necessity">Necessity</option>
+          <option value="discretionary">Discretionary</option>
+          <option value="savings">Savings</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Account debited
+        <input type="text" name="account" autocomplete="off" placeholder="e.g. DCU, ether.fi" list="account-suggestions">
+      </label>
+      <label>Owner
+        <select name="owner"></select>
+      </label>
+    </div>
+    <datalist id="account-suggestions"></datalist>
+    <p class="fine-print">Amount is per occurrence (a weekly $100 becomes ~$433/mo).
+    A day or weekday places it on the calendar for the pay-period window; leave the
+    day blank for undated monthly bills.</p>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-danger" id="expense-delete-btn">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="expense-cancel-btn">Cancel</button>
       <button type="submit" class="btn btn-primary" value="save">Save</button>
     </div>
   </form>
