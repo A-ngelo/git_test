@@ -61,6 +61,7 @@ function seedState() {
     it.contrib = 0;              // amount per period; you fill these in
     it.contribFreq = "monthly"; // used only when contrib > 0
     it.retirement = defaultRetirement(it);
+    it.apr = defaultApr(it);
   });
 
   const state = {
@@ -82,6 +83,7 @@ function seedState() {
     forecast: { horizon: 10 },
     expenses: seedExpenses(),
     expensesView: { start: "", end: "", account: "", basis: "full" },
+    advisor: { strategy: "grow-balance" },
   };
 
   const t = totals(state);
@@ -148,6 +150,18 @@ function seedExpenses() {
   }));
 }
 
+/* assumed interest rate (% APR) for debts, so the advisor can weigh
+   payoff vs. investing. Editable per entry; only meaningful for debts. */
+function defaultApr(it) {
+  if (!(it.value < 0)) return 0;
+  if (it.role === "defi-loan") return 4;
+  if (it.categoryId === "cards") return 22;
+  if (it.role === "heloc") return 8.5;
+  if (it.role === "property-loan") return 7;
+  if (it.categoryId === "loans") return 8;
+  return 0;
+}
+
 /* default retirement eligibility: growth assets, but not your home (you
    live in it) and not 529 college funds. Everything is toggleable. */
 function defaultRetirement(it) {
@@ -187,7 +201,9 @@ function load() {
           if (typeof it.contrib !== "number") { it.contrib = 0; migrated = true; }
           if (!it.contribFreq) { it.contribFreq = "monthly"; migrated = true; }
           if (typeof it.retirement !== "boolean") { it.retirement = defaultRetirement(it); migrated = true; }
+          if (typeof it.apr !== "number") { it.apr = defaultApr(it); migrated = true; }
         }
+        if (!s.advisor) { s.advisor = { strategy: "grow-balance" }; migrated = true; }
         if (!s.forecast) { s.forecast = { horizon: 10 }; migrated = true; }
         if (!Array.isArray(s.expenses)) { s.expenses = seedExpenses(); migrated = true; }
         if (!s.expensesView) { s.expensesView = { start: "", end: "", account: "", basis: "full" }; migrated = true; }
@@ -386,6 +402,214 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[c]);
+}
+
+/* ── Advisor ────────────────────────────────────────────────────
+   A transparent, rules-based engine: it reads your own numbers and
+   proposes prioritized ideas, re-ranked by the preference you pick.
+   No model, no network — every suggestion shows its math. */
+
+const STRATEGIES = [
+  ["debt-free",    "Be debt-free",   { debt: 1.7, risk: 1.2, liquidity: 0.9, growth: 0.5, retirement: 0.7, efficiency: 1.0 }],
+  ["grow-balance", "Grow + balance", { debt: 1.1, risk: 1.1, liquidity: 1.0, growth: 1.25, retirement: 1.15, efficiency: 1.05 }],
+  ["liquidity",    "Max liquidity",  { debt: 0.9, risk: 1.35, liquidity: 1.75, growth: 0.7, retirement: 0.8, efficiency: 1.0 }],
+  ["retirement",   "Retire sooner",  { debt: 0.95, risk: 1.0, liquidity: 0.8, growth: 1.3, retirement: 1.75, efficiency: 1.1 }],
+];
+
+/* Expected return on money you could actually redirect — investable
+   growth assets, excluding your home (you wouldn't buy more house with
+   spare cash). Weighted by value; falls back to 6% if none. */
+function expectedReturn() {
+  const list = forecastItems().filter((it) => it.role !== "property");
+  const tot = list.reduce((a, it) => a + it.value, 0);
+  if (tot <= 0) return 6;
+  return list.reduce((a, it) => a + it.value * (it.growth || 0), 0) / tot;
+}
+
+/* generate every applicable idea as {tag, base, title, body}; base 0–100 */
+function adviceCandidates() {
+  const ideas = [];
+  const m = computeMetrics(state.items);
+  const st = state.settings;
+  const ret = expectedReturn();
+  const debts = state.items
+    .filter((it) => it.value < 0)
+    .map((it) => ({ ...it, bal: -it.value, apr: it.apr || 0 }))
+    .sort((a, b) => b.apr - a.apr);
+
+  /* 1. high-APR debts that beat investing */
+  for (const d of debts) {
+    if (d.apr <= 0 || d.bal < 1) continue;
+    const moInterest = (d.bal * d.apr) / 100 / 12;
+    if (d.apr >= ret + 1) {
+      ideas.push({
+        tag: "debt", base: Math.min(95, 45 + d.apr + Math.min(25, d.bal / 1000)),
+        title: `Pay down ${d.name} (~${d.apr}% APR)`,
+        body: `${money(d.bal)} at ~${d.apr}% costs about ${money(moInterest)}/mo in interest. ` +
+          `Paying it off is a guaranteed ~${d.apr}% return — more than your ~${ret.toFixed(1)}% ` +
+          `expected asset growth, so it beats investing the same dollars.`,
+      });
+    } else if (d.apr > 0) {
+      ideas.push({
+        tag: "efficiency", base: 30,
+        title: `${d.name} is "cheap" debt (~${d.apr}%)`,
+        body: `At ~${d.apr}%, below your ~${ret.toFixed(1)}% expected growth, there's little rush to ` +
+          `prepay ${money(d.bal)} — investing spare cash likely comes out ahead. Keep paying on schedule.`,
+      });
+    }
+  }
+
+  /* 2. avalanche order if 2+ interest-bearing debts */
+  const rateDebts = debts.filter((d) => d.apr > 0 && d.bal >= 1);
+  if (rateDebts.length >= 2) {
+    ideas.push({
+      tag: "debt", base: 55,
+      title: "Attack debts highest-rate first",
+      body: "Order to clear them for the least interest: " +
+        rateDebts.map((d) => `${d.name} (${d.apr}%)`).join(" → ") + ".",
+    });
+  }
+
+  /* 3. emergency fund / excess cash */
+  const months = m.months;
+  if (st.monthlyExpenses > 0) {
+    if (months < 3) {
+      const need = 3 * st.monthlyExpenses - m.liquidity;
+      ideas.push({
+        tag: "liquidity", base: 90,
+        title: "Build a 3-month emergency fund",
+        body: `Liquid reserves cover about ${months.toFixed(1)} months. Adding roughly ` +
+          `${money(Math.max(0, need))} in cash gets you to a 3-month cushion.`,
+      });
+    } else if (months > 12) {
+      const excess = m.liquidity - 6 * st.monthlyExpenses;
+      ideas.push({
+        tag: "efficiency", base: 60,
+        title: "Put idle cash to work",
+        body: `You hold about ${months.toFixed(0)} months of runway — well past a 6-month cushion. ` +
+          `Roughly ${money(Math.max(0, excess))} could go toward your top-rate debt or growth ` +
+          `assets instead of sitting idle.`,
+      });
+    }
+  }
+
+  /* 4. DeFi risk */
+  if (m.vault > 0 && m.defiLoan > 0) {
+    if (m.ltv >= 0.5) {
+      ideas.push({
+        tag: "risk", base: 80,
+        title: "Trim your DeFi loan-to-value",
+        body: `LTV is ${(m.ltv * 100).toFixed(0)}% (${money(m.defiLoan)} against ${money(m.vault)}). ` +
+          `A market dip could risk liquidation — repaying some borrow or adding collateral lowers the risk.`,
+      });
+    }
+    if (m.stablesGap < 0) {
+      ideas.push({
+        tag: "risk", base: 50,
+        title: "Top up DeFi stablecoins",
+        body: `Your stablecoin balance is about ${money(-m.stablesGap)} short of the ${money(m.defiLoan)} ` +
+          `borrowed. Topping up keeps you able to repay on demand.`,
+      });
+    }
+  }
+
+  /* 5. redirect savings while carrying high-rate debt */
+  const topDebt = rateDebts[0];
+  const savingContribs = state.items.reduce((a, it) => a + (annualContrib(it) || 0), 0);
+  if (topDebt && topDebt.apr >= ret + 3 && savingContribs > 0) {
+    ideas.push({
+      tag: "debt", base: 65,
+      title: "Redirect some saving to your priciest debt",
+      body: `You're adding about ${money(savingContribs / 12)}/mo to growth assets earning ~${ret.toFixed(1)}%, ` +
+        `while ${topDebt.name} costs ${topDebt.apr}%. Steering some of that at the debt is a higher, ` +
+        `risk-free return until it's gone.`,
+    });
+  }
+
+  /* 6. retirement gap */
+  const by = expenseTotalsByType();
+  const swr = (st.withdrawalRate || 4) / 100;
+  const fullTarget = swr > 0 ? ((by.necessity + by.discretionary) * 12) / swr : 0;
+  const retList = retirementItems();
+  const retAssets = retList.reduce((a, it) => a + it.value, 0);
+  if (fullTarget > 0) {
+    const yrs = yearsToReach(fullTarget, retList);
+    if (yrs === null || yrs > 15) {
+      ideas.push({
+        tag: "retirement", base: 70,
+        title: "Close the retirement gap faster",
+        body: `Your retirement assets (${money(retAssets)}) are ${(retAssets / fullTarget * 100).toFixed(0)}% ` +
+          `of the ${money(fullTarget)} needed to retire on ${money(by.necessity + by.discretionary)}/mo. ` +
+          `Raising contributions or trimming that monthly figure pulls the date in.`,
+      });
+    } else if (yrs != null) {
+      ideas.push({
+        tag: "retirement", base: 55,
+        title: "You're on a solid retirement track",
+        body: `At current growth and contributions your retirement assets reach ${money(fullTarget)} in ` +
+          `about ${yrs.toFixed(0)} years. Extra contributions shorten that; lifestyle creep lengthens it.`,
+      });
+    }
+  }
+
+  /* 7. savings-rate note */
+  if (savingContribs > 0 && st.monthlyIncome > 0) {
+    const rate = (savingContribs / 12) / st.monthlyIncome * 100;
+    ideas.push({
+      tag: "growth", base: 40,
+      title: `Your savings rate is about ${rate.toFixed(0)}%`,
+      body: `You're investing ${money(savingContribs / 12)}/mo of your ${money(st.monthlyIncome)} take-home. ` +
+        (rate >= 20 ? "That's a strong rate — keep it steady." :
+          "Nudging this toward 20% meaningfully speeds up every long-term goal."),
+    });
+  }
+
+  return ideas;
+}
+
+function renderAdvisor() {
+  const row = document.getElementById("strategy-row");
+  row.innerHTML = "";
+  const current = (state.advisor && state.advisor.strategy) || "grow-balance";
+  for (const [key, label] of STRATEGIES) {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = label;
+    b.setAttribute("aria-pressed", String(key === current));
+    b.addEventListener("click", () => {
+      state.advisor.strategy = key;
+      persist();
+      renderAdvisor();
+    });
+    row.append(b);
+  }
+
+  const weights = (STRATEGIES.find(([k]) => k === current) || STRATEGIES[1])[2];
+  const ideas = adviceCandidates()
+    .map((i) => ({ ...i, score: i.base * (weights[i.tag] ?? 1) }))
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .slice(0, 7);
+
+  const body = document.getElementById("advice-body");
+  if (!ideas.length) {
+    body.innerHTML = `<p class="empty-note">No standout ideas right now — your numbers look balanced.</p>`;
+    return;
+  }
+  const tagName = { debt: "Debt", growth: "Growth", liquidity: "Liquidity", risk: "Risk", retirement: "Retirement", efficiency: "Efficiency" };
+  let html = "";
+  ideas.forEach((i, n) => {
+    html += `<div class="idea-card">
+      <div class="idea-head">
+        <span class="idea-num">${n + 1}</span>
+        <span class="idea-title">${esc(i.title)}</span>
+        <span class="idea-tag idea-tag-${i.tag}">${esc(tagName[i.tag] || i.tag)}</span>
+      </div>
+      <p class="idea-body">${esc(i.body)}</p>
+    </div>`;
+  });
+  html += `<p class="fine-print advisor-disclaimer">Generated from your own figures with transparent
+    rules — educational, not professional financial advice. Debt rates are your editable estimates.</p>`;
+  body.innerHTML = html;
 }
 
 function renderInsights() {
@@ -1828,6 +2052,7 @@ function openItemDialog(id) {
   itemForm.elements.liquidity.value = it ? it.liquidity : "liquid";
   itemForm.elements.role.value = it ? it.role : "";
   itemForm.elements.growth.value = it ? it.growth : "";
+  itemForm.elements.apr.value = it && it.apr ? it.apr : "";
   itemForm.elements.contrib.value = it && it.contrib ? it.contrib : "";
   itemForm.elements.contribFreq.value = it && it.contribFreq ? it.contribFreq : "monthly";
 
@@ -1855,6 +2080,7 @@ itemForm.addEventListener("submit", (e) => {
     return;
   }
   const growth = parseFloat(String(itemForm.elements.growth.value).replace(/[%\s]/g, ""));
+  const apr = parseFloat(String(itemForm.elements.apr.value).replace(/[%\s]/g, ""));
   const contrib = parseFloat(String(itemForm.elements.contrib.value).replace(/[$,\s]/g, ""));
   const data = {
     name: itemForm.elements.name.value.trim(),
@@ -1864,6 +2090,7 @@ itemForm.addEventListener("submit", (e) => {
     liquidity: itemForm.elements.liquidity.value,
     role: itemForm.elements.role.value,
     growth: Number.isFinite(growth) ? growth : 0,
+    apr: Number.isFinite(apr) ? apr : 0,
     contrib: Number.isFinite(contrib) ? contrib : 0,
     contribFreq: itemForm.elements.contribFreq.value,
   };
@@ -1922,6 +2149,7 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
 function renderAll() {
   renderHero();
   renderLedger();
+  renderAdvisor();
   renderInsights();
   renderForecast();
   renderContribList();
