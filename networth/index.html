@@ -58,6 +58,13 @@
 
   <!-- ═══════════ INSIGHTS ═══════════ -->
   <main id="tab-insights" class="tab-panel" role="tabpanel" hidden>
+    <div class="advisor">
+      <h2 class="section-label">Ideas for you</h2>
+      <p class="fine-print">Pick what you&rsquo;re optimizing for &mdash; the ideas below are
+      generated from your own numbers and re-ranked to match. Nothing leaves your device.</p>
+      <div class="strategy-row" id="strategy-row"></div>
+      <div id="advice-body"></div>
+    </div>
     <div id="insights-body"></div>
   </main>
 
@@ -230,6 +237,9 @@
       </label>
       <label>Yearly change (%)
         <input type="text" name="growth" inputmode="decimal" autocomplete="off" placeholder="e.g. 7 or -10">
+      </label>
+      <label>Interest APR (%) <span class="muted">(debts)</span>
+        <input type="text" name="apr" inputmode="decimal" autocomplete="off" placeholder="e.g. 22">
       </label>
     </div>
 

@@ -279,6 +279,74 @@ em { font-style: normal; }
   padding: 2rem 0;
 }
 
+/* ── Advisor ────────────────────────────────────────────────── */
+
+.advisor { margin-bottom: 1.8rem; }
+
+.strategy-row {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.strategy-row .btn[aria-pressed="true"] {
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  border-color: var(--accent-bg);
+}
+
+.idea-card {
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--ink);
+  border-radius: 2px;
+  padding: .7rem .85rem .75rem;
+  margin-bottom: .6rem;
+  background: var(--paper);
+}
+.idea-head {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  margin-bottom: .3rem;
+}
+.idea-num {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: .8rem;
+  color: var(--ink-faint);
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  width: 1.4rem;
+  height: 1.4rem;
+  line-height: 1.3rem;
+  text-align: center;
+}
+.idea-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+.idea-tag {
+  flex: 0 0 auto;
+  font-size: .62rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  padding: .1rem .35rem;
+  align-self: center;
+}
+.idea-tag-risk { border-style: dashed; }
+.idea-body {
+  font-size: .9rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.advisor-disclaimer { margin-top: .8rem; margin-bottom: 0; }
+
 /* ── Insights ───────────────────────────────────────────────── */
 
 .insight-grid {
