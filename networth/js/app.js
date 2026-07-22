@@ -82,7 +82,8 @@ function seedState() {
     snapshots: [],
     forecast: { horizon: 10 },
     expenses: seedExpenses(),
-    expensesView: { start: "", end: "", account: "", basis: "full", useGrace: true },
+    income: seedIncome(),
+    expensesView: { start: "", end: "", account: "DCU", basis: "full", useGrace: true, startBalance: 0, floor: 0 },
     advisor: { strategy: "grow-balance" },
   };
 
@@ -156,6 +157,15 @@ function defaultGrace(name) {
   return /mortgage/i.test(name || "") ? 15 : 0;
 }
 
+/* Income / paychecks, so the planner can project a running balance and
+   guardrail you against ever needing assets to cover a bill. */
+function seedIncome() {
+  return [{
+    id: "inc-0", name: "Paycheck", amount: 4855, freq: "biweekly",
+    weekday: 3, anchor: "2026-07-29", account: "DCU", owner: "Angelo",
+  }];
+}
+
 /* assumed interest rate (% APR) for debts, so the advisor can weigh
    payoff vs. investing. Editable per entry; only meaningful for debts. */
 function defaultApr(it) {
@@ -217,6 +227,9 @@ function load() {
         }
         if (!s.expensesView) { s.expensesView = { start: "", end: "", account: "", basis: "full" }; migrated = true; }
         if (typeof s.expensesView.useGrace !== "boolean") { s.expensesView.useGrace = true; migrated = true; }
+        if (typeof s.expensesView.startBalance !== "number") { s.expensesView.startBalance = 0; migrated = true; }
+        if (typeof s.expensesView.floor !== "number") { s.expensesView.floor = 0; migrated = true; }
+        if (!Array.isArray(s.income)) { s.income = seedIncome(); migrated = true; }
         if (typeof s.settings.withdrawalRate !== "number") { s.settings.withdrawalRate = 4.0; migrated = true; }
         if (typeof s.settings.monthlyIncome !== "number") { s.settings.monthlyIncome = 0; migrated = true; }
         if (migrated) persist(s);
@@ -1219,7 +1232,96 @@ function expenseOccurrences(e, start, end) {
 function expenseAccounts() {
   const set = new Set();
   for (const e of state.expenses) if (e.account && e.account.trim()) set.add(e.account.trim());
+  for (const inc of state.income) if (inc.account && inc.account.trim()) set.add(inc.account.trim());
   return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+/* paydays for one income source within [start, end] inclusive */
+function incomeOccurrences(inc, start, end) {
+  const out = [];
+  const amt = inc.amount || 0;
+  if (inc.freq === "biweekly") {
+    const anchor = parseLocalDate(inc.anchor);
+    if (!anchor) return out;
+    let d = new Date(anchor);
+    while (d > start) d = addDays(d, -14);
+    while (d < start) d = addDays(d, 14);
+    for (; d <= end; d = addDays(d, 14)) out.push({ date: new Date(d), amount: amt });
+  } else if (inc.freq === "weekly") {
+    const wd = Number(inc.weekday);
+    for (let x = new Date(start); x <= end; x = addDays(x, 1))
+      if (x.getDay() === wd) out.push({ date: new Date(x), amount: amt });
+  } else if (inc.freq === "monthly") {
+    let y = start.getFullYear(), m = start.getMonth();
+    const day = inc.day || 1;
+    while (true) {
+      const dim = new Date(y, m + 1, 0).getDate();
+      const dt = new Date(y, m, Math.min(day, dim), 12);
+      if (dt > end) break;
+      if (dt >= start) out.push({ date: dt, amount: amt });
+      m++; if (m > 11) { m = 0; y++; }
+    }
+  }
+  return out;
+}
+
+/* project a running balance across [start, end] for one account (or all):
+   start balance + paydays − bills (deferred bills move to the next payday
+   within their grace). Returns the event list, the lowest point, and the
+   trough with and without deferral so the guardrail can advise. */
+function projectBalance(start, end, account, useGrace) {
+  const acct = (x) => !account || (x.account || "") === account;
+
+  const paydaysExt = [];
+  for (const inc of state.income) {
+    if (!acct(inc)) continue;
+    for (const o of incomeOccurrences(inc, start, addDays(end, 90))) paydaysExt.push(o.date);
+  }
+  paydaysExt.sort((a, b) => a - b);
+
+  function build(defer) {
+    const events = [];
+    for (const inc of state.income) {
+      if (!acct(inc)) continue;
+      for (const o of incomeOccurrences(inc, start, end))
+        events.push({ date: o.date, label: inc.name, amount: o.amount, kind: "in" });
+    }
+    for (const e of state.expenses) {
+      if (!acct(e)) continue;
+      for (const occ of expenseOccurrences(e, start, end)) {
+        const grace = e.grace || 0;
+        const deadline = grace > 0 ? addDays(occ.date, grace) : occ.date;
+        const eligible = grace > 0 && deadline > end;
+        let payDate = occ.date;
+        if (defer && eligible) {
+          const p = paydaysExt.find((d) => d > occ.date && d <= deadline);
+          payDate = p ? new Date(p) : deadline;
+        }
+        events.push({ date: payDate, label: e.name, amount: -occ.amount, kind: "out",
+          due: occ.date, deferred: defer && eligible });
+      }
+    }
+    // same day: income first (+ before −)
+    events.sort((a, b) => a.date - b.date || b.amount - a.amount);
+    const startBalance = state.expensesView.startBalance || 0;
+    let bal = startBalance;
+    let trough = null; // lowest balance AFTER events unfold, not the opening instant
+    for (const ev of events) {
+      bal += ev.amount;
+      ev.balance = bal;
+      if (!trough || bal < trough.bal) trough = { bal, date: ev.date, label: ev.label };
+    }
+    if (!trough) trough = { bal: startBalance, date: start, label: "starting balance" };
+    return { events, trough, endBal: bal };
+  }
+
+  const withoutDefer = build(false);
+  const withDefer = build(true);
+  return {
+    shown: useGrace ? withDefer : withoutDefer,
+    troughNow: withoutDefer.trough,
+    troughDefer: withDefer.trough,
+  };
 }
 
 const fmtDate = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -1235,6 +1337,9 @@ function renderExpenses() {
   document.getElementById("retire-swr").value = state.settings.withdrawalRate;
   document.getElementById("retire-basis").value = state.expensesView.basis || "full";
   document.getElementById("exp-income").value = state.settings.monthlyIncome || "";
+  document.getElementById("cf-balance").value = state.expensesView.startBalance || "";
+  document.getElementById("cf-floor").value = state.expensesView.floor || "";
+  renderIncomeList();
   renderCashflow();
   renderExpenseSummary();
   renderRetirePicker();
@@ -1338,6 +1443,57 @@ function updateCashflow() {
         Defer eligible bills to my next pay
       </label>
     </div>`;
+  }
+
+  /* ── running-balance projection + guardrail ── */
+  const proj = projectBalance(start, end, v.account, useGrace);
+  const hasIncome = proj.shown.events.some((e) => e.kind === "in");
+  if (hasIncome || v.startBalance) {
+    const floor = v.floor || 0;
+    const shown = proj.shown;
+    const safeNow = proj.troughNow.bal >= floor;
+    const safeDefer = proj.troughDefer.bal >= floor;
+    const floorTxt = floor ? ` your ${money(floor)} floor` : " $0";
+
+    let verdictClass, verdictHtml;
+    if (safeNow) {
+      verdictClass = "good";
+      verdictHtml = `<strong>You're covered.</strong> Paying every bill on its due date, your ` +
+        `balance never drops below <strong>${money(proj.troughNow.bal)}</strong> ` +
+        `(${esc(fmtDate.format(proj.troughNow.date))}) — above${floorTxt}. ` +
+        (deferable.length ? `No need to defer the mortgage, though you can.` : ``);
+    } else if (safeDefer) {
+      verdictClass = "warn";
+      verdictHtml = `<strong>Defer to stay safe.</strong> Paying everything on time dips you to ` +
+        `<strong>${money(proj.troughNow.bal)}</strong> on ${esc(fmtDate.format(proj.troughNow.date))} — ` +
+        `below${floorTxt}. Deferring eligible bills (the mortgage) to your next paycheck lifts your ` +
+        `low point to <strong>${money(proj.troughDefer.bal)}</strong>. Keep the defer toggle on.`;
+    } else {
+      verdictClass = "bad";
+      verdictHtml = `<strong>Income doesn't cover this window.</strong> Even after deferring, your ` +
+        `balance falls to <strong>${money(proj.troughDefer.bal)}</strong> on ` +
+        `${esc(fmtDate.format(proj.troughDefer.date))}. You'd have to dip into savings — ` +
+        `trim expenses, move money in, or widen the window.`;
+    }
+
+    html += `<h2 class="section-label">Balance through the window</h2>
+      <div class="verdict verdict-${verdictClass}">${verdictHtml}</div>
+      <table class="snap-table balance-table"><thead><tr>
+        <th scope="col">Date</th><th scope="col">Event</th>
+        <th scope="col">In / out</th><th scope="col">Balance</th></tr></thead><tbody>`;
+    html += `<tr class="bal-start"><td>${esc(fmtDate.format(start))}</td>` +
+      `<td>Starting balance</td><td class="num"></td>` +
+      `<td class="num">${esc(money(v.startBalance || 0))}</td></tr>`;
+    for (const ev of shown.events) {
+      const low = ev.balance < floor;
+      const isTrough = ev.date.getTime() === shown.trough.date.getTime() && ev.balance === shown.trough.bal;
+      html += `<tr class="${ev.kind === "in" ? "bal-in" : ""}${low ? " bal-low" : ""}${isTrough ? " bal-trough" : ""}">` +
+        `<td>${esc(fmtDate.format(ev.date))}</td>` +
+        `<td>${esc(ev.label)}${ev.deferred ? ' <span class="muted">(deferred)</span>' : ""}</td>` +
+        `<td class="num">${ev.amount >= 0 ? "+" : "−"}${esc(moneyAbs(ev.amount))}</td>` +
+        `<td class="num">${ev.balance < 0 ? "−" : ""}${esc(moneyAbs(ev.balance))}</td></tr>`;
+    }
+    html += `</tbody></table>`;
   }
 
   if (!v.account && Object.keys(byAccount).length > 1) {
@@ -1598,6 +1754,113 @@ document.getElementById("exp-income").addEventListener("change", (e) => {
   const v = parseFloat(String(e.target.value).replace(/[$,\s]/g, ""));
   state.settings.monthlyIncome = Number.isFinite(v) ? v : 0;
   persist(); renderExpenseSummary();
+});
+
+/* ── income list + dialog ── */
+function incomeTiming(inc) {
+  if (inc.freq === "biweekly") return "Every 2 weeks" + (inc.anchor ? ", " + fmtDate.format(parseLocalDate(inc.anchor)) : "");
+  if (inc.freq === "weekly") return inc.weekday != null ? WEEKDAYS[inc.weekday] + "s" : "Weekly";
+  if (inc.freq === "monthly") return inc.day ? "Monthly, " + ordinal(inc.day) : "Monthly";
+  return inc.freq;
+}
+
+function renderIncomeList() {
+  const el = document.getElementById("income-list");
+  el.innerHTML = "";
+  if (!state.income.length) {
+    el.innerHTML = `<p class="empty-note">No paychecks yet. Add one so the projection knows your income.</p>`;
+    return;
+  }
+  for (const inc of state.income) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "expense-row";
+    row.title = "Edit " + inc.name;
+    const main = document.createElement("span");
+    main.className = "exp-main";
+    const nm = document.createElement("span");
+    nm.className = "exp-name";
+    nm.textContent = inc.name;
+    const meta = document.createElement("span");
+    meta.className = "exp-meta";
+    meta.textContent = [incomeTiming(inc), inc.account].filter(Boolean).join(" · ");
+    main.append(nm, meta);
+    const amt = document.createElement("span");
+    amt.className = "exp-amt";
+    amt.textContent = "+" + money(inc.amount);
+    row.append(main, amt);
+    row.addEventListener("click", () => openIncomeDialog(inc.id));
+    el.append(row);
+  }
+}
+
+const incomeDialog = document.getElementById("income-dialog");
+const incomeForm = document.getElementById("income-form");
+let editingIncomeId = null;
+
+function syncIncomeWhen() {
+  const freq = incomeForm.elements.freq.value;
+  document.getElementById("inc-when-weekday").hidden = !(freq === "weekly" || freq === "biweekly");
+  document.getElementById("inc-when-day").hidden = freq !== "monthly";
+  document.getElementById("inc-anchor-wrap").hidden = freq !== "biweekly";
+}
+
+function openIncomeDialog(id) {
+  editingIncomeId = id;
+  const inc = id ? state.income.find((x) => x.id === id) : null;
+  document.getElementById("income-dialog-title").textContent = inc ? "Edit paycheck" : "New paycheck";
+  document.getElementById("income-delete-btn").style.visibility = inc ? "visible" : "hidden";
+  incomeForm.elements.name.value = inc ? inc.name : "Paycheck";
+  incomeForm.elements.amount.value = inc ? inc.amount : "";
+  incomeForm.elements.freq.value = inc ? inc.freq : "biweekly";
+  fillSelect(incomeForm.elements.weekday, WEEKDAYS.map((w, i) => [String(i), w]),
+    inc && inc.weekday != null ? String(inc.weekday) : "3");
+  incomeForm.elements.day.value = inc && inc.freq === "monthly" && inc.day ? inc.day : "";
+  incomeForm.elements.anchor.value = inc && inc.anchor ? inc.anchor : "";
+  incomeForm.elements.account.value = inc ? (inc.account || "") : "";
+  fillSelect(incomeForm.elements.owner, state.owners.map((o) => [o, o]), inc ? inc.owner : state.owners[0]);
+  syncIncomeWhen();
+  incomeDialog.showModal();
+}
+
+incomeForm.elements.freq.addEventListener("change", syncIncomeWhen);
+document.getElementById("add-income-btn").addEventListener("click", () => openIncomeDialog(null));
+document.getElementById("income-cancel-btn").addEventListener("click", () => incomeDialog.close());
+document.getElementById("income-delete-btn").addEventListener("click", () => {
+  const inc = state.income.find((x) => x.id === editingIncomeId);
+  if (!inc || !confirm(`Remove "${inc.name}"?`)) return;
+  state.income = state.income.filter((x) => x.id !== editingIncomeId);
+  persist(); incomeDialog.close(); renderExpenses();
+});
+
+incomeForm.addEventListener("submit", (ev) => {
+  const amount = parseFloat(String(incomeForm.elements.amount.value).replace(/[$,\s]/g, ""));
+  const name = incomeForm.elements.name.value.trim();
+  if (!name || !Number.isFinite(amount)) { ev.preventDefault(); return; }
+  const freq = incomeForm.elements.freq.value;
+  const data = {
+    name, amount, freq,
+    weekday: Number(incomeForm.elements.weekday.value),
+    day: parseInt(incomeForm.elements.day.value, 10) || null,
+    anchor: incomeForm.elements.anchor.value || "",
+    account: incomeForm.elements.account.value.trim(),
+    owner: incomeForm.elements.owner.value,
+  };
+  if (editingIncomeId) Object.assign(state.income.find((x) => x.id === editingIncomeId), data);
+  else state.income.push({ id: uid(), ...data });
+  persist(); renderExpenses();
+});
+
+/* planner: starting balance + safety floor (static inputs, wired once) */
+document.getElementById("cf-balance").addEventListener("change", (e) => {
+  const v = parseFloat(String(e.target.value).replace(/[$,\s]/g, ""));
+  state.expensesView.startBalance = Number.isFinite(v) ? v : 0;
+  persist(); updateCashflow();
+});
+document.getElementById("cf-floor").addEventListener("change", (e) => {
+  const v = parseFloat(String(e.target.value).replace(/[$,\s]/g, ""));
+  state.expensesView.floor = Number.isFinite(v) ? v : 0;
+  persist(); updateCashflow();
 });
 
 /* ── expense dialog ── */

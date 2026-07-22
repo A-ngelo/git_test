@@ -119,9 +119,9 @@
   <!-- ═══════════ EXPENSES ═══════════ -->
   <main id="tab-expenses" class="tab-panel" role="tabpanel" hidden>
     <h2 class="section-label">Pay-period window</h2>
-    <p class="fine-print">Set a window from one payday to the next to see the total
-    of scheduled auto-pays that will hit an account &mdash; so you know how much to
-    keep there (and what you can waterfall elsewhere).</p>
+    <p class="fine-print">Set a window from one payday to the next. With your paychecks
+    baked in, it projects your running balance and guards against ever needing savings
+    to cover a bill &mdash; and tells you whether to pay the mortgage now or defer it.</p>
     <div class="cashflow-controls">
       <label>From
         <input type="date" id="cf-start">
@@ -132,8 +132,21 @@
       <label>Account
         <select id="cf-account"></select>
       </label>
+      <label>Balance now ($)
+        <input type="text" id="cf-balance" inputmode="decimal" autocomplete="off" placeholder="in that account">
+      </label>
+      <label>Safety floor ($)
+        <input type="text" id="cf-floor" inputmode="decimal" autocomplete="off" placeholder="never dip below">
+      </label>
     </div>
     <div id="cashflow-results"></div>
+
+    <h2 class="section-label">Paychecks</h2>
+    <p class="fine-print">Your income, baked in so the projection above knows what&rsquo;s coming.</p>
+    <div id="income-list"></div>
+    <div class="panel-actions">
+      <button class="btn" id="add-income-btn">+ Add paycheck</button>
+    </div>
 
     <h2 class="section-label">Monthly picture</h2>
     <div class="income-row">
@@ -362,6 +375,60 @@
       <button type="button" class="btn btn-danger" id="expense-delete-btn">Delete</button>
       <span class="spacer"></span>
       <button type="button" class="btn" id="expense-cancel-btn">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══════════ INCOME EDITOR ═══════════ -->
+<dialog id="income-dialog">
+  <form method="dialog" id="income-form">
+    <h2 id="income-dialog-title">Edit paycheck</h2>
+
+    <div class="form-row">
+      <label>Name
+        <input type="text" name="name" required autocomplete="off" placeholder="e.g. Paycheck">
+      </label>
+      <label>Amount ($)
+        <input type="text" name="amount" inputmode="decimal" required autocomplete="off" placeholder="per paycheck">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Frequency
+        <select name="freq">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </label>
+      <label id="inc-when-weekday">Payday
+        <select name="weekday"></select>
+      </label>
+      <label id="inc-when-day">Day of month
+        <input type="number" name="day" min="1" max="31" step="1" autocomplete="off" placeholder="e.g. 1">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label id="inc-anchor-wrap">Next payday <span class="muted">(anchors the every-2-weeks cycle)</span>
+        <input type="date" name="anchor">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Deposited to
+        <input type="text" name="account" autocomplete="off" placeholder="e.g. DCU" list="account-suggestions">
+      </label>
+      <label>Owner
+        <select name="owner"></select>
+      </label>
+    </div>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-danger" id="income-delete-btn">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="income-cancel-btn">Cancel</button>
       <button type="submit" class="btn btn-primary" value="save">Save</button>
     </div>
   </form>
