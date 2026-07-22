@@ -346,9 +346,17 @@
       </label>
     </div>
     <datalist id="account-suggestions"></datalist>
+
+    <div class="form-row">
+      <label>Grace period (days) <span class="muted">(0 = due on date)</span>
+        <input type="number" name="grace" min="0" max="60" step="1" autocomplete="off" placeholder="e.g. 15">
+      </label>
+      <label>&nbsp;</label>
+    </div>
     <p class="fine-print">Amount is per occurrence (a weekly $100 becomes ~$433/mo).
     A day or weekday places it on the calendar for the pay-period window; leave the
-    day blank for undated monthly bills.</p>
+    day blank for undated monthly bills. A grace period (e.g. a mortgage&rsquo;s 15 days)
+    lets the pay-period planner offer to defer it to your next paycheck.</p>
 
     <div class="dialog-actions">
       <button type="button" class="btn btn-danger" id="expense-delete-btn">Delete</button>
