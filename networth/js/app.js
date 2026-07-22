@@ -82,7 +82,7 @@ function seedState() {
     snapshots: [],
     forecast: { horizon: 10 },
     expenses: seedExpenses(),
-    expensesView: { start: "", end: "", account: "", basis: "full" },
+    expensesView: { start: "", end: "", account: "", basis: "full", useGrace: true },
     advisor: { strategy: "grow-balance" },
   };
 
@@ -147,7 +147,13 @@ function seedExpenses() {
   ];
   return rows.map(([name, amount, freq, when, account, owner, type], i) => ({
     id: "exp-" + i, name, amount, freq, when, account, owner, type,
+    grace: defaultGrace(name),
   }));
+}
+
+/* default grace period (days) — mortgages typically allow ~15 */
+function defaultGrace(name) {
+  return /mortgage/i.test(name || "") ? 15 : 0;
 }
 
 /* assumed interest rate (% APR) for debts, so the advisor can weigh
@@ -206,7 +212,11 @@ function load() {
         if (!s.advisor) { s.advisor = { strategy: "grow-balance" }; migrated = true; }
         if (!s.forecast) { s.forecast = { horizon: 10 }; migrated = true; }
         if (!Array.isArray(s.expenses)) { s.expenses = seedExpenses(); migrated = true; }
+        else for (const e of s.expenses) {
+          if (typeof e.grace !== "number") { e.grace = defaultGrace(e.name); migrated = true; }
+        }
         if (!s.expensesView) { s.expensesView = { start: "", end: "", account: "", basis: "full" }; migrated = true; }
+        if (typeof s.expensesView.useGrace !== "boolean") { s.expensesView.useGrace = true; migrated = true; }
         if (typeof s.settings.withdrawalRate !== "number") { s.settings.withdrawalRate = 4.0; migrated = true; }
         if (typeof s.settings.monthlyIncome !== "number") { s.settings.monthlyIncome = 0; migrated = true; }
         if (migrated) persist(s);
@@ -1252,6 +1262,8 @@ function renderCashflow() {
   updateCashflow();
 }
 
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+
 function updateCashflow() {
   const v = state.expensesView;
   const start = parseLocalDate(v.start);
@@ -1263,27 +1275,70 @@ function updateCashflow() {
     return;
   }
 
-  const rows = [];
-  const byAccount = {};
+  const useGrace = v.useGrace !== false;
+
+  /* every occurrence in the window, flagged if its grace lets it wait past end */
+  const all = [];
   for (const e of state.expenses) {
     if (v.account && (e.account || "") !== v.account) continue;
     for (const occ of expenseOccurrences(e, start, end)) {
-      rows.push({ date: occ.date, name: e.name, account: e.account || "—", amount: occ.amount });
-      const key = e.account || "—";
-      byAccount[key] = (byAccount[key] || 0) + occ.amount;
+      const grace = e.grace || 0;
+      const deadline = grace > 0 ? addDays(occ.date, grace) : occ.date;
+      all.push({
+        date: occ.date, name: e.name, account: e.account || "—",
+        amount: occ.amount, grace, deadline, canDefer: grace > 0 && deadline > end,
+      });
     }
   }
-  rows.sort((a, b) => a.date - b.date);
-  const total = rows.reduce((a, r) => a + r.amount, 0);
 
+  const deferable = all.filter((r) => r.canDefer);
+  const deferred = useGrace ? deferable : [];
+  const required = useGrace ? all.filter((r) => !r.canDefer) : all;
+
+  required.sort((a, b) => a.date - b.date);
+  deferred.sort((a, b) => a.deadline - b.deadline);
+
+  const byAccount = {};
+  for (const r of required) byAccount[r.account] = (byAccount[r.account] || 0) + r.amount;
+
+  const total = required.reduce((a, r) => a + r.amount, 0);
+  const payAll = all.reduce((a, r) => a + r.amount, 0);
+  const deferSum = deferable.reduce((a, r) => a + r.amount, 0);
   const days = Math.round((end - start) / 86400000) + 1;
   const acctLabel = v.account ? v.account : "all accounts";
 
   let html = `<div class="cashflow-headline">
     <span class="cf-total">${money(total)}</span>
     <span class="cf-cap">to cover from ${esc(fmtDate.format(start))} through
-    ${esc(fmtDate.format(end))} (${days} days) in <strong>${esc(acctLabel)}</strong></span>
+    ${esc(fmtDate.format(end))} (${days} days) in <strong>${esc(acctLabel)}</strong>${
+      useGrace && deferred.length ? ` &mdash; deferring ${money(deferSum)} to your next pay` : ""
+    }</span>
   </div>`;
+
+  /* grace-period callout: auto-noticed deferrable bills + the toggle */
+  if (deferable.length) {
+    html += `<div class="grace-callout">
+      <div class="grace-head">Grace period available</div>
+      <p class="grace-lead">${deferable.length} bill${deferable.length > 1 ? "s" : ""} due in this
+      window ${deferable.length > 1 ? "have" : "has"} a grace period that runs past
+      ${esc(fmtDate.format(end))}, so ${deferable.length > 1 ? "they" : "it"} can wait for your next paycheck:</p>
+      <ul class="grace-list">`;
+    for (const r of deferable) {
+      html += `<li><strong>${esc(r.name)}</strong> ${esc(money(r.amount))} &mdash; due
+        ${esc(fmtDate.format(r.date))}, safe until <strong>${esc(fmtDate.format(r.deadline))}</strong></li>`;
+    }
+    html += `</ul>
+      <div class="grace-options">
+        <span>Pay it all now: <strong>${esc(money(payAll))}</strong></span>
+        <span>Defer eligible: keep <strong>${esc(money(payAll - deferSum))}</strong> now,
+        ${esc(money(deferSum))} waits</span>
+      </div>
+      <label class="grace-toggle">
+        <input type="checkbox" id="cf-grace" ${useGrace ? "checked" : ""}>
+        Defer eligible bills to my next pay
+      </label>
+    </div>`;
+  }
 
   if (!v.account && Object.keys(byAccount).length > 1) {
     html += `<div class="insight-grid">`;
@@ -1292,20 +1347,40 @@ function updateCashflow() {
     html += `</div>`;
   }
 
-  if (!rows.length) {
+  if (!required.length && !deferred.length) {
     html += `<p class="empty-note">Nothing scheduled falls in this window.
     (Undated expenses aren't placed on the calendar — give them a day to see them here.)</p>`;
-  } else {
+  } else if (required.length) {
     html += `<table class="snap-table"><thead><tr>
       <th scope="col">Date</th><th scope="col">Expense</th>
       <th scope="col">Account</th><th scope="col">Amount</th></tr></thead><tbody>`;
-    for (const r of rows) {
+    for (const r of required) {
       html += `<tr><td>${esc(fmtDate.format(r.date))}</td><td>${esc(r.name)}</td>` +
         `<td>${esc(r.account)}</td><td class="num">${esc(money(r.amount))}</td></tr>`;
     }
     html += `</tbody></table>`;
   }
+
+  if (deferred.length) {
+    html += `<h2 class="section-label">Can wait until next pay</h2>
+      <table class="snap-table"><thead><tr>
+      <th scope="col">Due</th><th scope="col">Expense</th>
+      <th scope="col">Safe until</th><th scope="col">Amount</th></tr></thead><tbody>`;
+    for (const r of deferred) {
+      html += `<tr><td>${esc(fmtDate.format(r.date))}</td><td>${esc(r.name)}</td>` +
+        `<td>${esc(fmtDate.format(r.deadline))}</td><td class="num">${esc(money(r.amount))}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
   out.innerHTML = html;
+
+  const graceToggle = document.getElementById("cf-grace");
+  if (graceToggle) graceToggle.addEventListener("change", (e) => {
+    state.expensesView.useGrace = e.target.checked;
+    persist();
+    updateCashflow();
+  });
 }
 
 /* ── monthly summary ── */
@@ -1480,7 +1555,8 @@ function renderExpenseList() {
       nm.textContent = e.name;
       const meta = document.createElement("span");
       meta.className = "exp-meta";
-      meta.textContent = [expTiming(e), e.account].filter(Boolean).join(" · ");
+      meta.textContent = [expTiming(e), e.account, e.grace ? e.grace + "-day grace" : ""]
+        .filter(Boolean).join(" · ");
       main.append(nm, meta);
 
       const badge = document.createElement("span");
@@ -1552,6 +1628,7 @@ function openExpenseDialog(id) {
   expenseForm.elements.dayOfMonth.value =
     e && e.freq !== "weekly" && e.freq !== "biweekly" && e.when ? e.when : "";
   expenseForm.elements.account.value = e ? (e.account || "") : "";
+  expenseForm.elements.grace.value = e && e.grace ? e.grace : "";
   syncWhenField();
   expenseDialog.showModal();
 }
@@ -1583,11 +1660,13 @@ expenseForm.addEventListener("submit", (ev) => {
     const d = parseInt(expenseForm.elements.dayOfMonth.value, 10);
     when = Number.isFinite(d) && d >= 1 && d <= 31 ? d : null;
   }
+  const graceRaw = parseInt(expenseForm.elements.grace.value, 10);
   const data = {
     name, amount, freq, when,
     type: expenseForm.elements.type.value,
     owner: expenseForm.elements.owner.value,
     account: expenseForm.elements.account.value.trim(),
+    grace: Number.isFinite(graceRaw) && graceRaw > 0 ? graceRaw : 0,
   };
   if (editingExpenseId) {
     Object.assign(state.expenses.find((x) => x.id === editingExpenseId), data);
