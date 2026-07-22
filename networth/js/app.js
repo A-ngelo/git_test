@@ -161,7 +161,7 @@ function defaultGrace(name) {
    guardrail you against ever needing assets to cover a bill. */
 function seedIncome() {
   return [{
-    id: "inc-0", name: "Paycheck", amount: 4855, freq: "biweekly",
+    id: "inc-0", name: "Paycheck", amount: null, freq: "biweekly",
     weekday: 3, anchor: "2026-07-29", account: "DCU", owner: "Angelo",
   }];
 }
@@ -230,6 +230,10 @@ function load() {
         if (typeof s.expensesView.startBalance !== "number") { s.expensesView.startBalance = 0; migrated = true; }
         if (typeof s.expensesView.floor !== "number") { s.expensesView.floor = 0; migrated = true; }
         if (!Array.isArray(s.income)) { s.income = seedIncome(); migrated = true; }
+        else for (const inc of s.income) {
+          // undo the earlier hard-coded placeholder paycheck amount
+          if (inc.id === "inc-0" && inc.amount === 4855) { inc.amount = null; migrated = true; }
+        }
         if (typeof s.settings.withdrawalRate !== "number") { s.settings.withdrawalRate = 4.0; migrated = true; }
         if (typeof s.settings.monthlyIncome !== "number") { s.settings.monthlyIncome = 0; migrated = true; }
         if (migrated) persist(s);
@@ -1265,71 +1269,26 @@ function incomeOccurrences(inc, start, end) {
   return out;
 }
 
-/* project a running balance across [start, end] for one account (or all):
-   start balance + paydays − bills (deferred bills move to the next payday
-   within their grace). Returns the event list, the lowest point, and the
-   trough with and without deferral so the guardrail can advise. */
-function projectBalance(start, end, account, useGrace) {
-  const acct = (x) => !account || (x.account || "") === account;
-
-  const paydaysExt = [];
-  for (const inc of state.income) {
-    if (!acct(inc)) continue;
-    for (const o of incomeOccurrences(inc, start, addDays(end, 90))) paydaysExt.push(o.date);
+/* Draw down the account across the window: no paycheck lands mid-window —
+   the point is how much of your CURRENT balance to leave until next pay.
+   Returns each required bill with the running balance after it. */
+function drawDownWindow(requiredBills, startBalance) {
+  const rows = [...requiredBills].sort((a, b) => a.date - b.date);
+  let bal = startBalance;
+  let low = { bal: startBalance, date: null };
+  for (const r of rows) {
+    bal -= r.amount;
+    r.balance = bal;
+    if (bal < low.bal) low = { bal, date: r.date };
   }
-  paydaysExt.sort((a, b) => a - b);
-
-  function build(defer) {
-    const events = [];
-    for (const inc of state.income) {
-      if (!acct(inc)) continue;
-      for (const o of incomeOccurrences(inc, start, end))
-        events.push({ date: o.date, label: inc.name, amount: o.amount, kind: "in" });
-    }
-    for (const e of state.expenses) {
-      if (!acct(e)) continue;
-      for (const occ of expenseOccurrences(e, start, end)) {
-        const grace = e.grace || 0;
-        const deadline = grace > 0 ? addDays(occ.date, grace) : occ.date;
-        const eligible = grace > 0 && deadline > end;
-        let payDate = occ.date;
-        if (defer && eligible) {
-          const p = paydaysExt.find((d) => d > occ.date && d <= deadline);
-          payDate = p ? new Date(p) : deadline;
-        }
-        events.push({ date: payDate, label: e.name, amount: -occ.amount, kind: "out",
-          due: occ.date, deferred: defer && eligible });
-      }
-    }
-    // same day: income first (+ before −)
-    events.sort((a, b) => a.date - b.date || b.amount - a.amount);
-    const startBalance = state.expensesView.startBalance || 0;
-    let bal = startBalance;
-    let trough = null; // lowest balance AFTER events unfold, not the opening instant
-    for (const ev of events) {
-      bal += ev.amount;
-      ev.balance = bal;
-      if (!trough || bal < trough.bal) trough = { bal, date: ev.date, label: ev.label };
-    }
-    if (!trough) trough = { bal: startBalance, date: start, label: "starting balance" };
-    return { events, trough, endBal: bal };
-  }
-
-  const withoutDefer = build(false);
-  const withDefer = build(true);
-  return {
-    shown: useGrace ? withDefer : withoutDefer,
-    troughNow: withoutDefer.trough,
-    troughDefer: withDefer.trough,
-  };
+  return { rows, endBal: bal, low };
 }
 
-/* Look ahead: assuming you defer eligible bills from the current window,
-   project the NEXT pay period (next payday → the one after) so you can see
-   where the deferred bill lands and whether that period stays healthy. */
-function computeNextPeriod(start, end, account) {
+/* Next pay period's required outflow (bills paid in that period, including
+   ones deferred into it from now). Income amounts aren't assumed — it tells
+   you how much your NEXT paycheck needs to cover. */
+function nextPeriodOutflow(start, end, account) {
   const acct = (x) => !account || (x.account || "") === account;
-
   const paydays = [];
   for (const inc of state.income) {
     if (!acct(inc)) continue;
@@ -1337,44 +1296,33 @@ function computeNextPeriod(start, end, account) {
   }
   paydays.sort((a, b) => a - b);
   const after = paydays.filter((d) => d > start);
-  if (after.length < 1) return null;
-  const nextStart = after[0];                          // next period begins here
+  if (!after.length) return null;
+  const nextStart = after[0];
   const following = after.find((d) => d > nextStart);
   const nextEnd = addDays(following || addDays(nextStart, 14), -1);
 
-  const events = [];
-  for (const inc of state.income) {
-    if (!acct(inc)) continue;
-    for (const o of incomeOccurrences(inc, start, nextEnd))
-      events.push({ date: o.date, label: inc.name, amount: o.amount, kind: "in" });
-  }
+  let required = 0, deferredIn = 0;
+  const bills = [];
   for (const e of state.expenses) {
     if (!acct(e)) continue;
     for (const occ of expenseOccurrences(e, start, nextEnd)) {
       const grace = e.grace || 0;
       const deadline = grace > 0 ? addDays(occ.date, grace) : occ.date;
-      const eligible = grace > 0 && deadline > end;    // defer relative to current window
+      const eligible = grace > 0 && deadline > end;
       let payDate = occ.date;
       if (eligible) {
         const p = paydays.find((d) => d > occ.date && d <= deadline);
         payDate = p ? new Date(p) : deadline;
       }
-      events.push({ date: payDate, label: e.name, amount: -occ.amount, kind: "out", deferred: eligible });
+      if (payDate >= nextStart && payDate <= nextEnd) {
+        required += occ.amount;
+        if (eligible) deferredIn += occ.amount;
+        bills.push({ name: e.name, date: payDate, amount: occ.amount, deferred: eligible });
+      }
     }
   }
-  events.sort((a, b) => a.date - b.date || b.amount - a.amount);
-
-  let bal = state.expensesView.startBalance || 0;
-  let carry = bal, trough = null;
-  const nextEvents = [];
-  for (const ev of events) {
-    bal += ev.amount;
-    ev.balance = bal;
-    if (ev.date < nextStart) { carry = bal; }
-    else { nextEvents.push(ev); if (!trough || bal < trough.bal) trough = { bal, date: ev.date, label: ev.label }; }
-  }
-  if (!trough) trough = { bal: carry, date: nextStart, label: "—" };
-  return { nextStart, nextEnd, carry, trough, endBal: bal, events: nextEvents };
+  bills.sort((a, b) => a.date - b.date);
+  return { nextStart, nextEnd, required, deferredIn, bills };
 }
 
 const fmtDate = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -1498,90 +1446,74 @@ function updateCashflow() {
     </div>`;
   }
 
-  /* ── running-balance projection + guardrail ── */
-  const proj = projectBalance(start, end, v.account, useGrace);
-  const hasIncome = proj.shown.events.some((e) => e.kind === "in");
-  if (hasIncome || v.startBalance) {
-    const floor = v.floor || 0;
-    const shown = proj.shown;
-    const safeNow = proj.troughNow.bal >= floor;
-    const safeDefer = proj.troughDefer.bal >= floor;
-    const floorTxt = floor ? ` your ${money(floor)} floor` : " $0";
+  /* ── leave vs. sweep: how much to keep until next pay, invest the rest ── */
+  const floor = v.floor || 0;
+  const balanceNow = v.startBalance || 0;
+  const reserve = total + floor;                 // bills to cover (deferred excluded) + floor
+  const acctName = v.account || "the account";
 
-    let verdictClass, verdictHtml;
-    if (safeNow) {
-      verdictClass = "good";
-      verdictHtml = `<strong>You're covered.</strong> Paying every bill on its due date, your ` +
-        `balance never drops below <strong>${money(proj.troughNow.bal)}</strong> ` +
-        `(${esc(fmtDate.format(proj.troughNow.date))}) — above${floorTxt}. ` +
-        (deferable.length ? `No need to defer the mortgage, though you can.` : ``);
-    } else if (safeDefer) {
-      verdictClass = "warn";
-      verdictHtml = `<strong>Defer to stay safe.</strong> Paying everything on time dips you to ` +
-        `<strong>${money(proj.troughNow.bal)}</strong> on ${esc(fmtDate.format(proj.troughNow.date))} — ` +
-        `below${floorTxt}. Deferring eligible bills (the mortgage) to your next paycheck lifts your ` +
-        `low point to <strong>${money(proj.troughDefer.bal)}</strong>. Keep the defer toggle on.`;
+  html += `<h2 class="section-label">Leave vs. sweep</h2>`;
+  if (balanceNow > 0) {
+    const sweep = balanceNow - reserve;
+    if (sweep >= 0) {
+      html += `<div class="verdict verdict-good">
+        <strong>Leave ${money(reserve)}, sweep ${money(sweep)}.</strong>
+        ${money(total)} of bills clear before ${esc(fmtDate.format(end))}${
+          floor ? ` and you keep your ${money(floor)} floor` : ""
+        }; with ${money(balanceNow)} in ${esc(acctName)} that frees
+        <strong>${money(sweep)}</strong> to save/invest now.</div>`;
     } else {
-      verdictClass = "bad";
-      verdictHtml = `<strong>Income doesn't cover this window.</strong> Even after deferring, your ` +
-        `balance falls to <strong>${money(proj.troughDefer.bal)}</strong> on ` +
-        `${esc(fmtDate.format(proj.troughDefer.date))}. You'd have to dip into savings — ` +
-        `trim expenses, move money in, or widen the window.`;
+      html += `<div class="verdict verdict-bad">
+        <strong>You're ${money(-sweep)} short.</strong> These bills need ${money(reserve)}
+        but ${esc(acctName)} holds ${money(balanceNow)}. Don't sweep &mdash; ${
+          !useGrace && deferable.length ? `turn on defer to free ${money(deferSum)} of room, or ` : ""
+        }move cash in.</div>`;
     }
+  } else {
+    html += `<div class="verdict verdict-good">
+      <strong>Leave ${money(reserve)} in ${esc(acctName)}</strong> to cover every bill through
+      ${esc(fmtDate.format(end))}${floor ? ` plus your ${money(floor)} floor` : ""}. Everything above
+      that is free to invest. Enter your ${esc(acctName)} balance above to see the exact sweep amount.</div>`;
+  }
 
-    html += `<h2 class="section-label">Balance through the window</h2>
-      <div class="verdict verdict-${verdictClass}">${verdictHtml}</div>
-      <table class="snap-table balance-table"><thead><tr>
-        <th scope="col">Date</th><th scope="col">Event</th>
-        <th scope="col">In / out</th><th scope="col">Balance</th></tr></thead><tbody>`;
+  /* draw-down: current balance minus the bills, day by day (no paycheck mid-window) */
+  if (balanceNow > 0 && required.length) {
+    const dd = drawDownWindow(required, balanceNow);
+    html += `<table class="snap-table balance-table"><thead><tr>
+      <th scope="col">Date</th><th scope="col">Bill</th>
+      <th scope="col">Out</th><th scope="col">Balance</th></tr></thead><tbody>`;
     html += `<tr class="bal-start"><td>${esc(fmtDate.format(start))}</td>` +
-      `<td>Starting balance</td><td class="num"></td>` +
-      `<td class="num">${esc(money(v.startBalance || 0))}</td></tr>`;
-    for (const ev of shown.events) {
-      const low = ev.balance < floor;
-      const isTrough = ev.date.getTime() === shown.trough.date.getTime() && ev.balance === shown.trough.bal;
-      html += `<tr class="${ev.kind === "in" ? "bal-in" : ""}${low ? " bal-low" : ""}${isTrough ? " bal-trough" : ""}">` +
-        `<td>${esc(fmtDate.format(ev.date))}</td>` +
-        `<td>${esc(ev.label)}${ev.deferred ? ' <span class="muted">(deferred)</span>' : ""}</td>` +
-        `<td class="num">${ev.amount >= 0 ? "+" : "−"}${esc(moneyAbs(ev.amount))}</td>` +
-        `<td class="num">${ev.balance < 0 ? "−" : ""}${esc(moneyAbs(ev.balance))}</td></tr>`;
+      `<td>Balance now</td><td class="num"></td>` +
+      `<td class="num">${esc(money(balanceNow))}</td></tr>`;
+    for (const r of dd.rows) {
+      const low = r.balance < floor;
+      html += `<tr class="${low ? "bal-low" : ""}">` +
+        `<td>${esc(fmtDate.format(r.date))}</td><td>${esc(r.name)}</td>` +
+        `<td class="num">−${esc(moneyAbs(r.amount))}</td>` +
+        `<td class="num">${r.balance < 0 ? "−" : ""}${esc(moneyAbs(r.balance))}</td></tr>`;
     }
     html += `</tbody></table>`;
+  }
 
-    /* next pay period preview — where deferrals land, and does it stay healthy? */
-    const np = computeNextPeriod(start, end, v.account);
-    if (np && np.events.length) {
-      const npDeferred = np.events.filter((e) => e.deferred);
-      const npDeferSum = npDeferred.reduce((a, e) => a - e.amount, 0);
-      const npSafe = np.trough.bal >= floor;
-      html += `<h2 class="section-label">If you defer: next pay period</h2>
-        <div class="verdict verdict-${npSafe ? "good" : "warn"}">
-          <strong>${esc(fmtDate.format(np.nextStart))} – ${esc(fmtDate.format(np.nextEnd))}.</strong>
-          Carrying ${money(np.carry)} into it${
-            npDeferSum > 0 ? `, with the deferred ${money(npDeferSum)} landing here,` : ","
-          } your low point is <strong>${money(np.trough.bal)}</strong>
-          (${esc(fmtDate.format(np.trough.date))}) and you end near ${money(np.endBal)}.
-          ${npSafe ? "Deferring now keeps next period healthy too." :
-            `Heads up — next period dips below${floor ? " your " + money(floor) + " floor" : " $0"}, so deferring just moves the squeeze.`}
-        </div>
-        <details class="next-period-details"><summary>See next period day by day</summary>
-        <table class="snap-table balance-table"><thead><tr>
-          <th scope="col">Date</th><th scope="col">Event</th>
-          <th scope="col">In / out</th><th scope="col">Balance</th></tr></thead><tbody>
-        <tr class="bal-start"><td>${esc(fmtDate.format(np.nextStart))}</td>
-          <td>Carried in</td><td class="num"></td>
-          <td class="num">${esc(money(np.carry))}</td></tr>`;
-      for (const ev of np.events) {
-        const low = ev.balance < floor;
-        const isTrough = ev.date.getTime() === np.trough.date.getTime() && ev.balance === np.trough.bal;
-        html += `<tr class="${ev.kind === "in" ? "bal-in" : ""}${low ? " bal-low" : ""}${isTrough ? " bal-trough" : ""}">` +
-          `<td>${esc(fmtDate.format(ev.date))}</td>` +
-          `<td>${esc(ev.label)}${ev.deferred ? ' <span class="muted">(deferred in)</span>' : ""}</td>` +
-          `<td class="num">${ev.amount >= 0 ? "+" : "−"}${esc(moneyAbs(ev.amount))}</td>` +
-          `<td class="num">${ev.balance < 0 ? "−" : ""}${esc(moneyAbs(ev.balance))}</td></tr>`;
-      }
-      html += `</tbody></table></details>`;
+  /* next pay period: how much your NEXT paycheck needs to cover (incl. deferrals) */
+  const np = nextPeriodOutflow(start, end, v.account);
+  if (np && np.required > 0) {
+    html += `<h2 class="section-label">Next pay period</h2>
+      <div class="verdict verdict-warn">
+        <strong>${esc(fmtDate.format(np.nextStart))} – ${esc(fmtDate.format(np.nextEnd))}:</strong>
+        ${money(np.required)} in bills to clear${
+          np.deferredIn > 0 ? `, including the deferred ${money(np.deferredIn)} mortgage that lands here` : ""
+        }. Your ${esc(fmtDate.format(np.nextStart))} paycheck needs to cover at least
+        ${money(np.required + floor)}${floor ? " (bills + floor)" : ""} before you sweep again.</div>
+      <details class="next-period-details"><summary>See next period's bills</summary>
+      <table class="snap-table"><thead><tr>
+        <th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Amount</th></tr></thead><tbody>`;
+    for (const b of np.bills) {
+      html += `<tr><td>${esc(fmtDate.format(b.date))}</td>` +
+        `<td>${esc(b.name)}${b.deferred ? ' <span class="muted">(deferred in)</span>' : ""}</td>` +
+        `<td class="num">${esc(money(b.amount))}</td></tr>`;
     }
+    html += `</tbody></table></details>`;
   }
 
   if (!v.account && Object.keys(byAccount).length > 1) {
@@ -1875,7 +1807,7 @@ function renderIncomeList() {
     main.append(nm, meta);
     const amt = document.createElement("span");
     amt.className = "exp-amt";
-    amt.textContent = "+" + money(inc.amount);
+    amt.textContent = inc.amount ? "+" + money(inc.amount) : "varies";
     row.append(main, amt);
     row.addEventListener("click", () => openIncomeDialog(inc.id));
     el.append(row);
@@ -1899,7 +1831,7 @@ function openIncomeDialog(id) {
   document.getElementById("income-dialog-title").textContent = inc ? "Edit paycheck" : "New paycheck";
   document.getElementById("income-delete-btn").style.visibility = inc ? "visible" : "hidden";
   incomeForm.elements.name.value = inc ? inc.name : "Paycheck";
-  incomeForm.elements.amount.value = inc ? inc.amount : "";
+  incomeForm.elements.amount.value = inc && inc.amount ? inc.amount : "";
   incomeForm.elements.freq.value = inc ? inc.freq : "biweekly";
   fillSelect(incomeForm.elements.weekday, WEEKDAYS.map((w, i) => [String(i), w]),
     inc && inc.weekday != null ? String(inc.weekday) : "3");
@@ -1922,9 +1854,10 @@ document.getElementById("income-delete-btn").addEventListener("click", () => {
 });
 
 incomeForm.addEventListener("submit", (ev) => {
-  const amount = parseFloat(String(incomeForm.elements.amount.value).replace(/[$,\s]/g, ""));
+  const amountRaw = parseFloat(String(incomeForm.elements.amount.value).replace(/[$,\s]/g, ""));
+  const amount = Number.isFinite(amountRaw) ? amountRaw : null; // optional — income varies
   const name = incomeForm.elements.name.value.trim();
-  if (!name || !Number.isFinite(amount)) { ev.preventDefault(); return; }
+  if (!name) { ev.preventDefault(); return; }
   const freq = incomeForm.elements.freq.value;
   const data = {
     name, amount, freq,

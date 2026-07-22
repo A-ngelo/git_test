@@ -5,7 +5,7 @@
    GitHub Pages serves with a 10-minute max-age that would otherwise
    let stale files be re-cached. Bump CACHE to force a clean refetch. */
 
-const CACHE = "ledger-v11";
+const CACHE = "ledger-v12";
 const ASSETS = [
   "./",
   "./index.html",

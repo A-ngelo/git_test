@@ -119,9 +119,10 @@
   <!-- ═══════════ EXPENSES ═══════════ -->
   <main id="tab-expenses" class="tab-panel" role="tabpanel" hidden>
     <h2 class="section-label">Pay-period window</h2>
-    <p class="fine-print">Set a window from one payday to the next. With your paychecks
-    baked in, it projects your running balance and guards against ever needing savings
-    to cover a bill &mdash; and tells you whether to pay the mortgage now or defer it.</p>
+    <p class="fine-print">Set a window from one payday to the next, enter what&rsquo;s in the
+    account now, and it tells you exactly how much to <strong>leave</strong> to cover every
+    bill until next pay &mdash; so you can <strong>sweep</strong> the rest to save/invest. Your
+    paycheck amount doesn&rsquo;t matter here; only the payday date does.</p>
     <div class="cashflow-controls">
       <label>From
         <input type="date" id="cf-start">
@@ -389,8 +390,8 @@
       <label>Name
         <input type="text" name="name" required autocomplete="off" placeholder="e.g. Paycheck">
       </label>
-      <label>Amount ($)
-        <input type="text" name="amount" inputmode="decimal" required autocomplete="off" placeholder="per paycheck">
+      <label>Amount <span class="muted">(optional — income varies)</span>
+        <input type="text" name="amount" inputmode="decimal" autocomplete="off" placeholder="leave blank if it varies">
       </label>
     </div>
 
