@@ -1324,6 +1324,59 @@ function projectBalance(start, end, account, useGrace) {
   };
 }
 
+/* Look ahead: assuming you defer eligible bills from the current window,
+   project the NEXT pay period (next payday → the one after) so you can see
+   where the deferred bill lands and whether that period stays healthy. */
+function computeNextPeriod(start, end, account) {
+  const acct = (x) => !account || (x.account || "") === account;
+
+  const paydays = [];
+  for (const inc of state.income) {
+    if (!acct(inc)) continue;
+    for (const o of incomeOccurrences(inc, start, addDays(end, 160))) paydays.push(o.date);
+  }
+  paydays.sort((a, b) => a - b);
+  const after = paydays.filter((d) => d > start);
+  if (after.length < 1) return null;
+  const nextStart = after[0];                          // next period begins here
+  const following = after.find((d) => d > nextStart);
+  const nextEnd = addDays(following || addDays(nextStart, 14), -1);
+
+  const events = [];
+  for (const inc of state.income) {
+    if (!acct(inc)) continue;
+    for (const o of incomeOccurrences(inc, start, nextEnd))
+      events.push({ date: o.date, label: inc.name, amount: o.amount, kind: "in" });
+  }
+  for (const e of state.expenses) {
+    if (!acct(e)) continue;
+    for (const occ of expenseOccurrences(e, start, nextEnd)) {
+      const grace = e.grace || 0;
+      const deadline = grace > 0 ? addDays(occ.date, grace) : occ.date;
+      const eligible = grace > 0 && deadline > end;    // defer relative to current window
+      let payDate = occ.date;
+      if (eligible) {
+        const p = paydays.find((d) => d > occ.date && d <= deadline);
+        payDate = p ? new Date(p) : deadline;
+      }
+      events.push({ date: payDate, label: e.name, amount: -occ.amount, kind: "out", deferred: eligible });
+    }
+  }
+  events.sort((a, b) => a.date - b.date || b.amount - a.amount);
+
+  let bal = state.expensesView.startBalance || 0;
+  let carry = bal, trough = null;
+  const nextEvents = [];
+  for (const ev of events) {
+    bal += ev.amount;
+    ev.balance = bal;
+    if (ev.date < nextStart) { carry = bal; }
+    else { nextEvents.push(ev); if (!trough || bal < trough.bal) trough = { bal, date: ev.date, label: ev.label }; }
+  }
+  if (!trough) trough = { bal: carry, date: nextStart, label: "—" };
+  return { nextStart, nextEnd, carry, trough, endBal: bal, events: nextEvents };
+}
+
 const fmtDate = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
 
 function renderExpenses() {
@@ -1494,6 +1547,41 @@ function updateCashflow() {
         `<td class="num">${ev.balance < 0 ? "−" : ""}${esc(moneyAbs(ev.balance))}</td></tr>`;
     }
     html += `</tbody></table>`;
+
+    /* next pay period preview — where deferrals land, and does it stay healthy? */
+    const np = computeNextPeriod(start, end, v.account);
+    if (np && np.events.length) {
+      const npDeferred = np.events.filter((e) => e.deferred);
+      const npDeferSum = npDeferred.reduce((a, e) => a - e.amount, 0);
+      const npSafe = np.trough.bal >= floor;
+      html += `<h2 class="section-label">If you defer: next pay period</h2>
+        <div class="verdict verdict-${npSafe ? "good" : "warn"}">
+          <strong>${esc(fmtDate.format(np.nextStart))} – ${esc(fmtDate.format(np.nextEnd))}.</strong>
+          Carrying ${money(np.carry)} into it${
+            npDeferSum > 0 ? `, with the deferred ${money(npDeferSum)} landing here,` : ","
+          } your low point is <strong>${money(np.trough.bal)}</strong>
+          (${esc(fmtDate.format(np.trough.date))}) and you end near ${money(np.endBal)}.
+          ${npSafe ? "Deferring now keeps next period healthy too." :
+            `Heads up — next period dips below${floor ? " your " + money(floor) + " floor" : " $0"}, so deferring just moves the squeeze.`}
+        </div>
+        <details class="next-period-details"><summary>See next period day by day</summary>
+        <table class="snap-table balance-table"><thead><tr>
+          <th scope="col">Date</th><th scope="col">Event</th>
+          <th scope="col">In / out</th><th scope="col">Balance</th></tr></thead><tbody>
+        <tr class="bal-start"><td>${esc(fmtDate.format(np.nextStart))}</td>
+          <td>Carried in</td><td class="num"></td>
+          <td class="num">${esc(money(np.carry))}</td></tr>`;
+      for (const ev of np.events) {
+        const low = ev.balance < floor;
+        const isTrough = ev.date.getTime() === np.trough.date.getTime() && ev.balance === np.trough.bal;
+        html += `<tr class="${ev.kind === "in" ? "bal-in" : ""}${low ? " bal-low" : ""}${isTrough ? " bal-trough" : ""}">` +
+          `<td>${esc(fmtDate.format(ev.date))}</td>` +
+          `<td>${esc(ev.label)}${ev.deferred ? ' <span class="muted">(deferred in)</span>' : ""}</td>` +
+          `<td class="num">${ev.amount >= 0 ? "+" : "−"}${esc(moneyAbs(ev.amount))}</td>` +
+          `<td class="num">${ev.balance < 0 ? "−" : ""}${esc(moneyAbs(ev.balance))}</td></tr>`;
+      }
+      html += `</tbody></table></details>`;
+    }
   }
 
   if (!v.account && Object.keys(byAccount).length > 1) {
