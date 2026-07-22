@@ -552,6 +552,63 @@ em { font-style: normal; }
 
 /* ── Expenses ───────────────────────────────────────────────── */
 
+.period-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  padding: .3rem .4rem;
+  margin-bottom: 1rem;
+  background: var(--paper);
+}
+.period-arrow {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  width: 2.4rem;
+  height: 2.4rem;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+}
+.period-arrow:hover:not(:disabled) { background: var(--paper-deep); }
+.period-arrow:disabled { color: var(--hairline); cursor: default; }
+.period-center { flex: 1; text-align: center; min-width: 0; }
+.period-range {
+  display: block;
+  font-size: .98rem;
+  letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;
+}
+.period-today {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  font-family: inherit;
+  font-size: .72rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: .1rem;
+  text-decoration: underline;
+}
+.period-today:hover { color: var(--ink); }
+.custom-range { margin: -.4rem 0 1rem; }
+.custom-range > summary {
+  cursor: pointer;
+  font-size: .78rem;
+  color: var(--ink-faint);
+  letter-spacing: .04em;
+}
+.custom-range > summary:hover { color: var(--ink); }
+.custom-range .cashflow-controls { margin-top: .6rem; }
+.swipeable { touch-action: pan-y; }
+
 .cashflow-controls,
 .retire-controls {
   display: grid;

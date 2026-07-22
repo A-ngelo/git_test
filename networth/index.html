@@ -119,17 +119,19 @@
   <!-- ═══════════ EXPENSES ═══════════ -->
   <main id="tab-expenses" class="tab-panel" role="tabpanel" hidden>
     <h2 class="section-label">Pay-period window</h2>
-    <p class="fine-print">Set a window from one payday to the next, enter what&rsquo;s in the
-    account now, and it tells you exactly how much to <strong>leave</strong> to cover every
-    bill until next pay &mdash; so you can <strong>sweep</strong> the rest to save/invest. Your
-    paycheck amount doesn&rsquo;t matter here; only the payday date does.</p>
+    <p class="fine-print">Step through your biweekly pay periods with the arrows (or swipe)
+    &mdash; no need to pick dates. Enter what&rsquo;s in the account and it tells you how much to
+    <strong>leave</strong> to cover every bill until next pay, so you can <strong>sweep</strong>
+    the rest to invest.</p>
+    <div class="period-nav" id="period-nav">
+      <button class="period-arrow" id="period-prev" aria-label="Previous pay period">&#8249;</button>
+      <div class="period-center">
+        <span class="period-range" id="period-range">&nbsp;</span>
+        <button class="period-today" id="period-today" hidden>Jump to now</button>
+      </div>
+      <button class="period-arrow" id="period-next" aria-label="Next pay period">&#8250;</button>
+    </div>
     <div class="cashflow-controls">
-      <label>From
-        <input type="date" id="cf-start">
-      </label>
-      <label>To
-        <input type="date" id="cf-end">
-      </label>
       <label>Account
         <select id="cf-account"></select>
       </label>
@@ -140,7 +142,14 @@
         <input type="text" id="cf-floor" inputmode="decimal" autocomplete="off" placeholder="never dip below">
       </label>
     </div>
-    <div id="cashflow-results"></div>
+    <details class="custom-range">
+      <summary>Custom date range</summary>
+      <div class="cashflow-controls">
+        <label>From <input type="date" id="cf-start"></label>
+        <label>To <input type="date" id="cf-end"></label>
+      </div>
+    </details>
+    <div id="cashflow-results" class="swipeable"></div>
 
     <h2 class="section-label">Paychecks</h2>
     <p class="fine-print">Your income, baked in so the projection above knows what&rsquo;s coming.</p>

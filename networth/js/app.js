@@ -83,7 +83,7 @@ function seedState() {
     forecast: { horizon: 10 },
     expenses: seedExpenses(),
     income: seedIncome(),
-    expensesView: { start: "", end: "", account: "DCU", basis: "full", useGrace: true, startBalance: 0, floor: 0 },
+    expensesView: { start: "", end: "", account: "DCU", basis: "full", useGrace: true, startBalance: 0, floor: 0, periodStart: "", customRange: false },
     advisor: { strategy: "grow-balance" },
   };
 
@@ -229,6 +229,8 @@ function load() {
         if (typeof s.expensesView.useGrace !== "boolean") { s.expensesView.useGrace = true; migrated = true; }
         if (typeof s.expensesView.startBalance !== "number") { s.expensesView.startBalance = 0; migrated = true; }
         if (typeof s.expensesView.floor !== "number") { s.expensesView.floor = 0; migrated = true; }
+        if (typeof s.expensesView.periodStart !== "string") { s.expensesView.periodStart = ""; migrated = true; }
+        if (typeof s.expensesView.customRange !== "boolean") { s.expensesView.customRange = false; migrated = true; }
         if (!Array.isArray(s.income)) { s.income = seedIncome(); migrated = true; }
         else for (const inc of s.income) {
           // undo the earlier hard-coded placeholder paycheck amount
@@ -1348,27 +1350,124 @@ function renderExpenses() {
   renderExpenseList();
 }
 
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function iso(d) { return d.toISOString().slice(0, 10); }
+function today12() { const t = new Date(); t.setHours(12, 0, 0, 0); return t; }
+
+/* the sequence of paydays (±5 years) from your schedule, used to snap the
+   window to whole pay periods you can step through. */
+function schedulePaydays() {
+  const acct = state.expensesView.account;
+  const inc = state.income.find((i) => (i.account || "") === acct) || state.income[0];
+  if (!inc) return [];
+  const t = today12();
+  const days = incomeOccurrences(inc, addDays(t, -5 * 365), addDays(t, 5 * 365)).map((o) => o.date);
+  days.sort((a, b) => a - b);
+  return days;
+}
+
+/* index of the pay period containing `date` (last payday ≤ date) */
+function periodIndexFor(date, paydays) {
+  let idx = 0;
+  for (let i = 0; i < paydays.length; i++) { if (paydays[i] <= date) idx = i; else break; }
+  return idx;
+}
+
+/* resolve the currently-selected pay period to {start, end, index, paydays},
+   snapping v.periodStart onto the schedule and defaulting to "now". */
+function currentPeriod() {
+  const v = state.expensesView;
+  const paydays = schedulePaydays();
+  if (paydays.length < 2) return null;
+  let idx = -1;
+  if (v.periodStart) {
+    const ps = parseLocalDate(v.periodStart);
+    idx = paydays.findIndex((d) => Math.abs(d - ps) < 43200000); // within 12h
+  }
+  if (idx < 0 || idx >= paydays.length - 1) idx = periodIndexFor(today12(), paydays);
+  idx = Math.max(0, Math.min(idx, paydays.length - 2));
+  return { start: paydays[idx], end: paydays[idx + 1], index: idx, paydays };
+}
+
+function setPeriod(start, end) {
+  const v = state.expensesView;
+  v.periodStart = iso(start);
+  v.start = iso(start);
+  v.end = iso(end);
+}
+
 /* ── cash-flow window planner ── */
 function renderCashflow() {
   const v = state.expensesView;
-  const startEl = document.getElementById("cf-start");
-  const endEl = document.getElementById("cf-end");
   const acctEl = document.getElementById("cf-account");
-
-  if (!v.start || !v.end) {
-    const today = new Date();
-    const plus14 = new Date(); plus14.setDate(today.getDate() + 14);
-    v.start = v.start || today.toISOString().slice(0, 10);
-    v.end = v.end || plus14.toISOString().slice(0, 10);
-  }
-  startEl.value = v.start;
-  endEl.value = v.end;
   fillSelect(acctEl, [["", "All accounts"]].concat(expenseAccounts().map((a) => [a, a])), v.account);
 
+  const nav = document.getElementById("period-nav");
+  const rangeEl = document.getElementById("period-range");
+  const todayBtn = document.getElementById("period-today");
+  const custom = v.customRange && v.start && v.end;
+  const period = custom ? null : currentPeriod();
+
+  if (period) {
+    nav.hidden = false;
+    setPeriod(period.start, period.end);
+    const nowIdx = periodIndexFor(today12(), period.paydays);
+    const isNow = period.index === nowIdx;
+    rangeEl.textContent = `${fmtDate.format(period.start)} – ${fmtDate.format(period.end)}` +
+      (isNow ? " · this period" : "");
+    todayBtn.textContent = "Jump to now";
+    todayBtn.hidden = isNow;
+    document.getElementById("period-prev").disabled = period.index <= 0;
+    document.getElementById("period-next").disabled = period.index >= period.paydays.length - 2;
+  } else if (custom) {
+    nav.hidden = false;
+    rangeEl.textContent = `${fmtDate.format(parseLocalDate(v.start))} – ${fmtDate.format(parseLocalDate(v.end))} · custom`;
+    todayBtn.textContent = "Back to pay periods";
+    todayBtn.hidden = false;
+    document.getElementById("period-prev").disabled = false;
+    document.getElementById("period-next").disabled = false;
+  } else {
+    // no usable schedule and no custom range — seed a 14-day window
+    nav.hidden = true;
+    if (!v.start || !v.end) {
+      const t = today12();
+      v.start = v.start || iso(t);
+      v.end = v.end || iso(addDays(t, 14));
+    }
+  }
+
+  document.getElementById("cf-start").value = v.start || "";
+  document.getElementById("cf-end").value = v.end || "";
   updateCashflow();
 }
 
-function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function stepPeriod(delta) {
+  const v = state.expensesView;
+  v.customRange = false;
+  const paydays = schedulePaydays();
+  if (paydays.length < 2) return;
+  let idx = -1;
+  if (v.periodStart) {
+    const ps = parseLocalDate(v.periodStart);
+    idx = paydays.findIndex((d) => Math.abs(d - ps) < 43200000);
+  }
+  if (idx < 0) idx = periodIndexFor(today12(), paydays);
+  idx = Math.max(0, Math.min(idx + delta, paydays.length - 2));
+  setPeriod(paydays[idx], paydays[idx + 1]);
+  persist();
+  renderCashflow();
+}
+
+function jumpToNow() {
+  const v = state.expensesView;
+  v.customRange = false;
+  const paydays = schedulePaydays();
+  if (paydays.length < 2) return;
+  const i = periodIndexFor(today12(), paydays);
+  setPeriod(paydays[i], paydays[Math.min(i + 1, paydays.length - 1)]);
+  persist();
+  renderCashflow();
+}
 
 function updateCashflow() {
   const v = state.expensesView;
@@ -1882,6 +1981,40 @@ document.getElementById("cf-floor").addEventListener("change", (e) => {
   const v = parseFloat(String(e.target.value).replace(/[$,\s]/g, ""));
   state.expensesView.floor = Number.isFinite(v) ? v : 0;
   persist(); updateCashflow();
+});
+
+/* pay-period navigation: arrows, "jump to now", and swipe */
+document.getElementById("period-prev").addEventListener("click", () => stepPeriod(-1));
+document.getElementById("period-next").addEventListener("click", () => stepPeriod(1));
+document.getElementById("period-today").addEventListener("click", jumpToNow);
+
+(function enableSwipe() {
+  const zone = document.getElementById("cashflow-results");
+  let x0 = null, y0 = null;
+  zone.addEventListener("touchstart", (e) => {
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, { passive: true });
+  zone.addEventListener("touchend", (e) => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    const dy = e.changedTouches[0].clientY - y0;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      stepPeriod(dx < 0 ? 1 : -1); // swipe left → next period
+    }
+    x0 = y0 = null;
+  }, { passive: true });
+})();
+
+/* custom date inputs (in the collapsible) detach from the pay-period schedule */
+document.getElementById("cf-start").addEventListener("change", (e) => {
+  state.expensesView.start = e.target.value;
+  state.expensesView.customRange = true;
+  persist(); renderCashflow();
+});
+document.getElementById("cf-end").addEventListener("change", (e) => {
+  state.expensesView.end = e.target.value;
+  state.expensesView.customRange = true;
+  persist(); renderCashflow();
 });
 
 /* ── expense dialog ── */
