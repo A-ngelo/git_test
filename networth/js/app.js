@@ -9,6 +9,11 @@
 
 const STORAGE_KEY = "networth-ledger-v1";
 
+/* sync state (declared early so persist() can reference it safely) */
+let syncCfg = null;      // { blobId, keyB64, enabled } once sharing is on
+let adopting = false;    // true while replacing local state with a remote pull
+let pushTimer = null, pullTimer = null, lastSyncState = "";
+
 /* ── Seed data (imported from the Assets & Debts spreadsheet) ── */
 
 function seedState() {
@@ -85,6 +90,7 @@ function seedState() {
     income: seedIncome(),
     expensesView: { start: "", end: "", account: "DCU", basis: "full", useGrace: true, startBalance: 0, floor: 0, periodStart: "", customRange: false },
     advisor: { strategy: "grow-balance" },
+    updatedAt: Date.now(),
   };
 
   const t = totals(state);
@@ -238,6 +244,7 @@ function load() {
         }
         if (typeof s.settings.withdrawalRate !== "number") { s.settings.withdrawalRate = 4.0; migrated = true; }
         if (typeof s.settings.monthlyIncome !== "number") { s.settings.monthlyIncome = 0; migrated = true; }
+        if (typeof s.updatedAt !== "number") { s.updatedAt = Date.now(); migrated = true; }
         if (migrated) persist(s);
         return s;
       }
@@ -249,7 +256,9 @@ function load() {
 }
 
 function persist(s = state) {
+  if (!adopting) s.updatedAt = Date.now();   // mark as a local edit for sync
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  if (!adopting && typeof schedulePush === "function") schedulePush();
 }
 
 function uid() {
@@ -2655,8 +2664,226 @@ function renderAll() {
   renderSettings();
 }
 
+/* ── Sharing / sync (end-to-end encrypted) ──────────────────────
+   Optional. The whole state is AES-GCM encrypted on-device and the
+   ciphertext is stored in a shared bin; the share link carries the key
+   in its URL fragment (never sent to a server). Last-write-wins by
+   updatedAt. Local storage + JSON export remain the source of truth. */
+
+const SYNC_KEY = "networth-sync-v1";
+const SYNC_BASE = "https://jsonblob.com/api/jsonBlob";
+
+function loadSyncCfg() {
+  try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || null; } catch (_) { return null; }
+}
+function saveSyncCfg() {
+  if (syncCfg) localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg));
+  else localStorage.removeItem(SYNC_KEY);
+}
+
+function b64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function unb64(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(s), a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return a;
+}
+const importKey = (s) => crypto.subtle.importKey("raw", unb64(s), { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+
+async function encryptState(keyB64) {
+  const key = await importKey(keyB64);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key,
+    new TextEncoder().encode(JSON.stringify(state)));
+  return { v: 1, updatedAt: state.updatedAt || Date.now(), iv: b64(iv), data: b64(ct) };
+}
+async function decryptEnvelope(env, keyB64) {
+  const key = await importKey(keyB64);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(env.iv) }, key, unb64(env.data));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function schedulePush() {
+  if (!syncCfg || !syncCfg.enabled || adopting) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushNow, 1200);
+}
+async function pushNow() {
+  if (!syncCfg || !syncCfg.enabled) return;
+  setSyncState("saving");
+  try {
+    const env = await encryptState(syncCfg.keyB64);
+    const res = await fetch(SYNC_BASE + "/" + syncCfg.blobId, {
+      method: "PUT", headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(env),
+    });
+    setSyncState(res.ok ? "synced" : "error");
+  } catch (_) { setSyncState("offline"); }
+}
+async function pullNow() {
+  if (!syncCfg || !syncCfg.enabled) return;
+  try {
+    const res = await fetch(SYNC_BASE + "/" + syncCfg.blobId, { headers: { "Accept": "application/json" } });
+    if (!res.ok) { setSyncState("error"); return; }
+    const env = await res.json();
+    if (env && env.updatedAt && env.updatedAt > (state.updatedAt || 0)) {
+      const remote = await decryptEnvelope(env, syncCfg.keyB64);
+      adopting = true;
+      state = remote;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      applyTheme();
+      renderAll();
+      adopting = false;
+    }
+    setSyncState("synced");
+  } catch (_) { setSyncState("offline"); }
+}
+
+function startSyncLoop() {
+  clearInterval(pullTimer);
+  if (syncCfg && syncCfg.enabled) {
+    pullNow();
+    pullTimer = setInterval(pullNow, 20000);
+  }
+}
+
+async function createSharedSpace() {
+  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  const keyB64 = b64(await crypto.subtle.exportKey("raw", key));
+  syncCfg = { blobId: null, keyB64, enabled: true };
+  const env = await encryptState(keyB64);
+  const res = await fetch(SYNC_BASE, {
+    method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify(env),
+  });
+  const id = (res.headers.get("Location") || "").split("/").pop();
+  if (!res.ok || !id) { syncCfg = null; throw new Error("could not reach the sync service"); }
+  syncCfg.blobId = id;
+  saveSyncCfg();
+  startSyncLoop();
+  renderSyncPanel();
+}
+
+async function joinSharedSpace(link) {
+  const m = String(link).match(/sync=([^~\s]+)~([^~\s]+)/);
+  if (!m) throw new Error("that doesn't look like a share link");
+  const blobId = m[1], keyB64 = m[2];
+  const res = await fetch(SYNC_BASE + "/" + blobId, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error("shared space not found (it may have expired)");
+  const env = await res.json();
+  const remote = await decryptEnvelope(env, keyB64); // throws if the key is wrong
+  syncCfg = { blobId, keyB64, enabled: true };
+  saveSyncCfg();
+  adopting = true;
+  state = remote;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  applyTheme();
+  renderAll();
+  adopting = false;
+  startSyncLoop();
+}
+
+function stopSync() {
+  syncCfg = null;
+  saveSyncCfg();
+  clearInterval(pullTimer);
+  clearTimeout(pushTimer);
+  renderSyncPanel();
+}
+
+function shareLink() {
+  if (!syncCfg || !syncCfg.blobId) return "";
+  const base = location.origin + location.pathname.replace(/index\.html$/, "");
+  return base + "#sync=" + syncCfg.blobId + "~" + syncCfg.keyB64;
+}
+
+function setSyncState(s) { lastSyncState = s; const el = document.getElementById("sync-state"); if (el) el.textContent = syncStateLabel(); }
+function syncStateLabel() {
+  const t = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return ({ saving: "Saving…", synced: "Synced " + t, error: "Sync error — will retry", offline: "Offline — will retry" })[lastSyncState] || "";
+}
+
+function esc2(s) { return esc(String(s)); }
+
+function renderSyncPanel() {
+  const el = document.getElementById("sync-panel");
+  if (!el) return;
+  if (syncCfg && syncCfg.enabled) {
+    const link = shareLink();
+    el.innerHTML = `
+      <div class="verdict verdict-good"><strong>Sharing is on.</strong>
+      This device is syncing. <span id="sync-state">${esc2(syncStateLabel())}</span></div>
+      <label class="sync-link-label">Share link (send to your partner privately)
+        <textarea id="sync-link" class="sync-link" readonly rows="2">${esc2(link)}</textarea>
+      </label>
+      <div class="panel-actions">
+        <button class="btn btn-primary" id="sync-copy">Copy link</button>
+        <button class="btn" id="sync-pull">Refresh now</button>
+        <button class="btn btn-danger" id="sync-stop">Stop syncing</button>
+      </div>`;
+    document.getElementById("sync-copy").addEventListener("click", async () => {
+      const box = document.getElementById("sync-link");
+      box.select();
+      try { await navigator.clipboard.writeText(link); } catch (_) { document.execCommand("copy"); }
+      const b = document.getElementById("sync-copy");
+      b.textContent = "Copied!"; setTimeout(() => (b.textContent = "Copy link"), 1500);
+    });
+    document.getElementById("sync-pull").addEventListener("click", pullNow);
+    document.getElementById("sync-stop").addEventListener("click", () => {
+      if (confirm("Stop syncing on this device? Your data stays here; the other device keeps its copy.")) stopSync();
+    });
+  } else {
+    el.innerHTML = `
+      <div class="panel-actions">
+        <button class="btn btn-primary" id="sync-create">Create a shared space</button>
+        <button class="btn" id="sync-join">Join with a link</button>
+      </div>`;
+    document.getElementById("sync-create").addEventListener("click", async () => {
+      const b = document.getElementById("sync-create");
+      b.disabled = true; b.textContent = "Setting up…";
+      try {
+        await createSharedSpace();
+        alert("Shared space created. Copy the link below and send it to your partner — opening it on their phone joins this ledger.");
+      } catch (e) { alert("Couldn't set up sharing: " + e.message); b.disabled = false; b.textContent = "Create a shared space"; }
+    });
+    document.getElementById("sync-join").addEventListener("click", async () => {
+      const link = prompt("Paste the share link your partner sent you:");
+      if (!link) return;
+      try {
+        if (!confirm("Joining will REPLACE this device's data with the shared ledger. Continue?")) return;
+        await joinSharedSpace(link);
+        renderSyncPanel();
+        alert("Joined! This device now syncs with the shared ledger.");
+      } catch (e) { alert("Couldn't join: " + e.message); }
+    });
+  }
+}
+
+/* boot */
+syncCfg = loadSyncCfg();
 applyTheme();
 renderAll();
+renderSyncPanel();
+
+(async function initSync() {
+  if (/sync=[^~]+~/.test(location.hash)) {
+    try {
+      if (confirm("Open shared ledger? This device will sync with it (its current data will be replaced).")) {
+        await joinSharedSpace(location.hash);
+        renderSyncPanel();
+      }
+    } catch (e) { alert("Couldn't join shared space: " + e.message); }
+    history.replaceState(null, "", location.pathname + location.search);
+  } else if (syncCfg && syncCfg.enabled) {
+    startSyncLoop();
+  }
+})();
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pullNow(); });
+window.addEventListener("focus", () => pullNow());
 
 /* PWA: offline cache + ask the browser not to evict our data.
    Service workers need http(s) — opening via file:// still works,

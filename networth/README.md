@@ -61,6 +61,24 @@ Two saving notes:
   from Safari (or any other device), use **Settings → Export JSON** there
   and **Import JSON** in the installed app.
 
+## Sharing with a partner (optional sync)
+
+Settings → **Share with your partner** syncs the ledger between two phones.
+The entire state is **AES-GCM encrypted in the browser** before it's stored in
+a shared bin, and the **encryption key travels only in the share link's URL
+fragment** (which browsers never send to a server) — so the sync host only ever
+sees ciphertext.
+
+- **Create a shared space** generates the encrypted bin and a share link.
+- Send that link to your partner privately (text/email) — it's the key, so
+  don't post it publicly. Opening it on their phone (or Settings → **Join with
+  a link**) joins the shared ledger.
+- Both devices push on change (debounced) and pull on load, on focus, and every
+  20s. Conflict handling is **last-write-wins** by an `updatedAt` timestamp, so
+  it's best not to edit the same thing simultaneously.
+- Your local copy and JSON export remain the source of truth; if the bin is
+  unreachable the app keeps working offline and retries.
+
 ## Conventions
 
 - Positive value = asset, negative value = debt (same as the spreadsheet).
