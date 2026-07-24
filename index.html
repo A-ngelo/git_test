@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>The Ledger — Net Worth</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f5f1e6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16150f" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="book-header">
+    <div class="book-header-row">
+      <span class="ornament">&#10086;</span>
+      <h1>The Ledger</h1>
+      <button id="theme-toggle" class="icon-btn" title="Toggle night mode" aria-label="Toggle night mode">&#9789;</button>
+    </div>
+    <p class="subtitle">a quiet record of what is owned &amp; what is owed</p>
+  </header>
+
+  <section class="hero" aria-label="Net worth summary">
+    <p class="hero-label">Net Worth</p>
+    <p class="hero-number" id="hero-networth">$0</p>
+    <div class="hero-split">
+      <span><em id="hero-assets">$0</em> owned</span>
+      <span class="hero-dot">&middot;</span>
+      <span><em id="hero-debts">$0</em> owed</span>
+    </div>
+  </section>
+
+  <nav class="chapters" role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="ledger" aria-selected="true">Ledger</button>
+    <button role="tab" data-tab="insights" aria-selected="false">Insights</button>
+    <button role="tab" data-tab="forecast" aria-selected="false">Forecast</button>
+    <button role="tab" data-tab="expenses" aria-selected="false">Expenses</button>
+    <button role="tab" data-tab="history" aria-selected="false">History</button>
+    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  </nav>
+
+  <!-- ═══════════ LEDGER ═══════════ -->
+  <main id="tab-ledger" class="tab-panel" role="tabpanel">
+    <div class="panel-actions">
+      <button class="btn" id="add-item-btn">+ Add entry</button>
+    </div>
+    <div id="ledger-groups"></div>
+  </main>
+
+  <!-- ═══════════ INSIGHTS ═══════════ -->
+  <main id="tab-insights" class="tab-panel" role="tabpanel" hidden>
+    <div class="advisor">
+      <h2 class="section-label">Ideas for you</h2>
+      <p class="fine-print">Pick what you&rsquo;re optimizing for &mdash; the ideas below are
+      generated from your own numbers and re-ranked to match. Nothing leaves your device.</p>
+      <div class="strategy-row" id="strategy-row"></div>
+      <div id="advice-body"></div>
+    </div>
+    <div id="insights-body"></div>
+  </main>
+
+  <!-- ═══════════ FORECAST ═══════════ -->
+  <main id="tab-forecast" class="tab-panel" role="tabpanel" hidden>
+    <p class="fine-print">This projects the <strong>value of your growth assets</strong>
+    &mdash; cash, investments, crypto, retirement and real estate. Vehicles and debts
+    are left out, so it forecasts what your holdings are worth, not net worth.</p>
+    <h2 class="section-label">Horizon</h2>
+    <div class="horizon-row" id="horizon-row"></div>
+    <div class="chart-legend" id="forecast-legend" hidden>
+      <span><span class="legend-swatch"></span>Current plan</span>
+      <span><span class="legend-swatch dashed"></span>What-if</span>
+    </div>
+    <div id="forecast-chart-wrap" class="chart-wrap"></div>
+    <div id="forecast-tooltip" class="chart-tooltip" hidden></div>
+    <p class="fine-print" id="milestone-note"></p>
+    <p class="fine-print" id="contrib-summary"></p>
+
+    <h2 class="section-label">What if&hellip;</h2>
+    <p class="fine-print">Thinking of selling, buying more, or paying something down?
+    Move an amount between entries &mdash; or in/out of the ledger entirely &mdash;
+    and see where it leaves you today and at the horizon. The ledger itself is
+    untouched; this is purely a sketch.</p>
+    <div class="whatif-grid">
+      <label>Amount ($)
+        <input id="wi-amount" type="number" min="0" step="any" placeholder="e.g. 10000">
+      </label>
+      <label>From
+        <select id="wi-from"></select>
+      </label>
+      <label>To
+        <select id="wi-to"></select>
+      </label>
+    </div>
+    <div id="whatif-results"></div>
+
+    <h2 class="section-label">Contributions</h2>
+    <p class="fine-print">How much you add to each account, and how often. These
+    are treated as steady deposits that compound at the account&rsquo;s growth rate
+    &mdash; the engine behind a retirement forecast. Leave an amount blank for
+    accounts you don&rsquo;t fund.</p>
+    <div id="contrib-list"></div>
+
+    <h2 class="section-label">Growth assumptions</h2>
+    <p class="fine-print">Expected yearly change for each entry, in % per year &mdash;
+    use negative numbers for things that lose value (cars) or debts being paid down.
+    A simple compound model; edit freely, it drives everything above.</p>
+    <div id="growth-list"></div>
+  </main>
+
+  <!-- ═══════════ EXPENSES ═══════════ -->
+  <main id="tab-expenses" class="tab-panel" role="tabpanel" hidden>
+    <h2 class="section-label">Pay-period window</h2>
+    <p class="fine-print">Step through your biweekly pay periods with the arrows (or swipe)
+    &mdash; no need to pick dates. Enter what&rsquo;s in the account and it tells you how much to
+    <strong>leave</strong> to cover every bill until next pay, so you can <strong>sweep</strong>
+    the rest to invest.</p>
+    <div class="period-nav" id="period-nav">
+      <button class="period-arrow" id="period-prev" aria-label="Previous pay period">&#8249;</button>
+      <div class="period-center">
+        <span class="period-range" id="period-range">&nbsp;</span>
+        <button class="period-today" id="period-today" hidden>Jump to now</button>
+      </div>
+      <button class="period-arrow" id="period-next" aria-label="Next pay period">&#8250;</button>
+    </div>
+    <div class="cashflow-controls">
+      <label>Account
+        <select id="cf-account"></select>
+      </label>
+      <label>Balance now ($)
+        <input type="text" id="cf-balance" inputmode="decimal" autocomplete="off" placeholder="in that account">
+      </label>
+      <label>Safety floor ($)
+        <input type="text" id="cf-floor" inputmode="decimal" autocomplete="off" placeholder="never dip below">
+      </label>
+    </div>
+    <details class="custom-range">
+      <summary>Custom date range</summary>
+      <div class="cashflow-controls">
+        <label>From <input type="date" id="cf-start"></label>
+        <label>To <input type="date" id="cf-end"></label>
+      </div>
+    </details>
+    <div id="cashflow-results" class="swipeable"></div>
+
+    <h2 class="section-label">Paychecks</h2>
+    <p class="fine-print">Your income, baked in so the projection above knows what&rsquo;s coming.</p>
+    <div id="income-list"></div>
+    <div class="panel-actions">
+      <button class="btn" id="add-income-btn">+ Add paycheck</button>
+    </div>
+
+    <h2 class="section-label">Monthly picture</h2>
+    <div class="income-row">
+      <label>Take-home / month <span class="muted">(optional, for surplus)</span>
+        <input type="text" id="exp-income" inputmode="decimal" autocomplete="off" placeholder="e.g. 13900">
+      </label>
+    </div>
+    <div id="expense-summary"></div>
+
+    <h2 class="section-label">Retirement number</h2>
+    <div class="retire-controls">
+      <label>Withdrawal rate (%)
+        <input type="number" id="retire-swr" min="1" max="20" step="0.1">
+      </label>
+      <label>Progress toward
+        <select id="retire-basis">
+          <option value="full">Full (necessities + discretionary)</option>
+          <option value="lean">Lean (necessities only)</option>
+        </select>
+      </label>
+    </div>
+    <div id="retirement-body"></div>
+    <div class="progress-track retire-track" aria-hidden="true"><div class="progress-fill" id="retire-progress"></div></div>
+    <p class="progress-caption" id="retire-progress-cap"></p>
+    <details id="retire-picker" class="retire-picker">
+      <summary>Choose which assets fund retirement</summary>
+      <p class="fine-print">Your home and kids&rsquo; accounts usually don&rsquo;t belong in a
+      retirement nest egg. Uncheck anything that shouldn&rsquo;t count toward the numbers above.</p>
+      <div id="retire-assets"></div>
+    </details>
+
+    <h2 class="section-label">All expenses</h2>
+    <div class="panel-actions">
+      <button class="btn" id="add-expense-btn">+ Add expense</button>
+    </div>
+    <div id="expense-list"></div>
+  </main>
+
+  <!-- ═══════════ HISTORY ═══════════ -->
+  <main id="tab-history" class="tab-panel" role="tabpanel" hidden>
+    <div class="panel-actions">
+      <button class="btn" id="snapshot-btn">+ Record snapshot</button>
+    </div>
+    <p class="fine-print">Record a snapshot whenever you update your numbers &mdash;
+    the chart below traces your net worth through time.</p>
+    <div id="chart-wrap" class="chart-wrap"></div>
+    <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+    <h2 class="section-label">Entries</h2>
+    <div id="snapshot-table"></div>
+  </main>
+
+  <!-- ═══════════ SETTINGS ═══════════ -->
+  <main id="tab-settings" class="tab-panel" role="tabpanel" hidden>
+    <h2 class="section-label">Assumptions</h2>
+    <p class="fine-print">These feed the Insights chapter. Adjust them to match your situation.</p>
+    <div id="settings-form" class="settings-grid"></div>
+
+    <h2 class="section-label">Categories</h2>
+    <p class="fine-print">Rename, reorder, add or remove the shelves your entries sit on.</p>
+    <div id="category-list"></div>
+    <div class="panel-actions">
+      <button class="btn" id="add-category-btn">+ Add category</button>
+    </div>
+
+    <h2 class="section-label">Owners</h2>
+    <div id="owner-list"></div>
+    <div class="panel-actions">
+      <button class="btn" id="add-owner-btn">+ Add owner</button>
+    </div>
+
+    <h2 class="section-label">Share with your partner</h2>
+    <p class="fine-print">Sync this ledger between two phones. Your data is
+    <strong>encrypted on your device</strong> before it&rsquo;s stored, so the sync
+    service only ever sees scrambled data &mdash; the share link holds the key, so
+    treat it like a password (text or email it, don&rsquo;t post it). Whoever saves
+    last wins, so it&rsquo;s best if you&rsquo;re not both editing the same thing at once.</p>
+    <div id="sync-panel"></div>
+
+    <h2 class="section-label">Your data</h2>
+    <p class="fine-print">Everything is stored privately in this browser. Export a copy
+    to back it up or move it to another device.</p>
+    <div class="panel-actions">
+      <button class="btn" id="export-btn">Export JSON</button>
+      <button class="btn" id="import-btn">Import JSON</button>
+      <input type="file" id="import-file" accept="application/json" hidden>
+      <button class="btn btn-danger" id="reset-btn">Reset to spreadsheet</button>
+    </div>
+  </main>
+
+  <footer class="reader-footer">
+    <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progress-fill"></div></div>
+    <p class="progress-caption" id="progress-caption"></p>
+  </footer>
+
+</div>
+
+<!-- ═══════════ ENTRY EDITOR ═══════════ -->
+<dialog id="item-dialog">
+  <form method="dialog" id="item-form">
+    <h2 id="item-dialog-title">Edit entry</h2>
+
+    <label>Name
+      <input type="text" name="name" required autocomplete="off">
+    </label>
+
+    <div class="form-row">
+      <label>Value (negative for a debt)
+        <input type="text" name="value" inputmode="decimal" required autocomplete="off" placeholder="e.g. 12500 or -3400">
+      </label>
+      <label>Yearly change (%)
+        <input type="text" name="growth" inputmode="decimal" autocomplete="off" placeholder="e.g. 7 or -10">
+      </label>
+      <label>Interest APR (%) <span class="muted">(debts)</span>
+        <input type="text" name="apr" inputmode="decimal" autocomplete="off" placeholder="e.g. 22">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Contribution ($)
+        <input type="text" name="contrib" inputmode="decimal" autocomplete="off" placeholder="e.g. 500 (blank = none)">
+      </label>
+      <label>How often
+        <select name="contribFreq">
+          <option value="daily">Per day</option>
+          <option value="weekly">Per week</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="monthly">Per month</option>
+          <option value="yearly">Per year</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Category
+        <select name="categoryId"></select>
+      </label>
+      <label>Owner
+        <select name="owner"></select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Liquidity
+        <select name="liquidity">
+          <option value="liquid">Liquid — spendable now</option>
+          <option value="retirement">Retirement — haircut applies</option>
+          <option value="illiquid">Illiquid — not counted</option>
+        </select>
+      </label>
+      <label>Special role
+        <select name="role">
+          <option value="">None</option>
+          <option value="property">Property</option>
+          <option value="property-loan">Property loan (mortgage)</option>
+          <option value="heloc">HELOC balance</option>
+          <option value="defi-vault">DeFi vault (collateral)</option>
+          <option value="defi-loan">DeFi loan (borrowed)</option>
+        </select>
+      </label>
+    </div>
+    <p class="fine-print">Liquidity and role drive the Insights chapter: home equity,
+    DeFi loan health, available liquidity and months of runway.</p>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-danger" id="item-delete-btn">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="item-cancel-btn">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══════════ EXPENSE EDITOR ═══════════ -->
+<dialog id="expense-dialog">
+  <form method="dialog" id="expense-form">
+    <h2 id="expense-dialog-title">Edit expense</h2>
+
+    <label>Name
+      <input type="text" name="name" required autocomplete="off">
+    </label>
+
+    <div class="form-row">
+      <label>Amount ($)
+        <input type="text" name="amount" inputmode="decimal" required autocomplete="off" placeholder="per occurrence">
+      </label>
+      <label>Frequency
+        <select name="freq">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label id="exp-when-day">Day of month <span class="muted">(1–31, optional)</span>
+        <input type="number" name="dayOfMonth" min="1" max="31" step="1" autocomplete="off" placeholder="e.g. 15">
+      </label>
+      <label id="exp-when-weekday">Weekday
+        <select name="weekday"></select>
+      </label>
+      <label>Type
+        <select name="type">
+          <option value="necessity">Necessity</option>
+          <option value="discretionary">Discretionary</option>
+          <option value="savings">Savings</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Account debited
+        <input type="text" name="account" autocomplete="off" placeholder="e.g. DCU, ether.fi" list="account-suggestions">
+      </label>
+      <label>Owner
+        <select name="owner"></select>
+      </label>
+    </div>
+    <datalist id="account-suggestions"></datalist>
+
+    <div class="form-row">
+      <label>Grace period (days) <span class="muted">(0 = due on date)</span>
+        <input type="number" name="grace" min="0" max="60" step="1" autocomplete="off" placeholder="e.g. 15">
+      </label>
+      <label>&nbsp;</label>
+    </div>
+    <p class="fine-print">Amount is per occurrence (a weekly $100 becomes ~$433/mo).
+    A day or weekday places it on the calendar for the pay-period window; leave the
+    day blank for undated monthly bills. A grace period (e.g. a mortgage&rsquo;s 15 days)
+    lets the pay-period planner offer to defer it to your next paycheck.</p>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-danger" id="expense-delete-btn">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="expense-cancel-btn">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══════════ INCOME EDITOR ═══════════ -->
+<dialog id="income-dialog">
+  <form method="dialog" id="income-form">
+    <h2 id="income-dialog-title">Edit paycheck</h2>
+
+    <div class="form-row">
+      <label>Name
+        <input type="text" name="name" required autocomplete="off" placeholder="e.g. Paycheck">
+      </label>
+      <label>Amount <span class="muted">(optional — income varies)</span>
+        <input type="text" name="amount" inputmode="decimal" autocomplete="off" placeholder="leave blank if it varies">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Frequency
+        <select name="freq">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </label>
+      <label id="inc-when-weekday">Payday
+        <select name="weekday"></select>
+      </label>
+      <label id="inc-when-day">Day of month
+        <input type="number" name="day" min="1" max="31" step="1" autocomplete="off" placeholder="e.g. 1">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label id="inc-anchor-wrap">Next payday <span class="muted">(anchors the every-2-weeks cycle)</span>
+        <input type="date" name="anchor">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>Deposited to
+        <input type="text" name="account" autocomplete="off" placeholder="e.g. DCU" list="account-suggestions">
+      </label>
+      <label>Owner
+        <select name="owner"></select>
+      </label>
+    </div>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-danger" id="income-delete-btn">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="income-cancel-btn">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══════════ SNAPSHOT DIALOG ═══════════ -->
+<dialog id="snapshot-dialog">
+  <form method="dialog" id="snapshot-form">
+    <h2>Record snapshot</h2>
+    <p class="fine-print">Saves today&rsquo;s totals as a point in your history.</p>
+    <label>Date
+      <input type="date" name="date" required>
+    </label>
+    <label>Note <span class="muted">(optional)</span>
+      <input type="text" name="note" autocomplete="off" placeholder="e.g. after bonus, market dip&hellip;">
+    </label>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="snapshot-cancel-btn">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="js/app.js"></script>
+</body>
+</html>
